@@ -29,6 +29,8 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { Project } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+
 interface UserSession {
   name: string;
   role: 'chef' | 'host';
