@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { supabase } from '@/lib/supabase';
+import AvatarDisplay from '../AvatarDisplay';
 
 interface AuthScreenProps {
   onEntry: (userData: { name: string; role: 'chef' | 'host'; avatar: string }) => void;
@@ -14,10 +16,41 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onEntry }) => {
   const [name, setName] = useState('');
   const [role, setRole] = useState<'chef' | 'host'>('chef');
   const [avatar, setAvatar] = useState(AVATARS[0]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploading(true);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      setAvatar(publicUrl);
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      alert('Error al subir la imagen. Asegúrate de que el bucket "avatars" sea público.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || uploading) return;
     onEntry({ name, role, avatar });
   };
 
@@ -33,19 +66,39 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onEntry }) => {
 
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Avatar Selector */}
-          <div className="flex justify-center gap-3 overflow-x-auto py-2">
+          <div className="flex justify-center items-center gap-3 overflow-x-auto py-2 no-scrollbar">
             {AVATARS.map((a) => (
               <button
                 key={a}
                 type="button"
                 onClick={() => setAvatar(a)}
-                className={`text-3xl w-14 h-14 flex items-center justify-center rounded-2xl transition-all ${
+                className={`text-3xl min-w-[3.5rem] h-14 flex items-center justify-center rounded-2xl transition-all ${
                   avatar === a ? 'bg-kitchen-cool scale-110 shadow-lg' : 'bg-white/5 hover:bg-white/10'
                 }`}
               >
                 {a}
               </button>
             ))}
+            
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileUpload} 
+              className="hidden" 
+              accept="image/*"
+            />
+            
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={`text-3xl min-w-[3.5rem] h-14 flex items-center justify-center rounded-2xl transition-all border-2 border-dashed ${
+                avatar.startsWith('http') ? 'border-kitchen-cool bg-kitchen-cool/10 scale-110 shadow-lg' : 'border-white/10 bg-white/5 hover:bg-white/10'
+              } ${uploading ? 'animate-pulse' : ''}`}
+            >
+              {uploading ? '⏳' : avatar.startsWith('http') ? (
+                <AvatarDisplay avatar={avatar} className="w-10 h-10" />
+              ) : '📷'}
+            </button>
           </div>
 
           <div className="space-y-4">

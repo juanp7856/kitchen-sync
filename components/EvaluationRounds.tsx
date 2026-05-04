@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import DishCard from './DishCard';
+import AvatarDisplay from './AvatarDisplay';
 import { Project } from '@/lib/types';
 
 interface RoundState {
@@ -88,7 +89,7 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ isHost, projects, c
       currentChefIndex: 0,
       order: shuffledChefs,
       chefData,
-      timeLeft: 90,
+      timeLeft: 120,
     };
 
     setRound(initialState);
@@ -105,7 +106,7 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ isHost, projects, c
       const newState = {
         ...round,
         currentChefIndex: nextIndex,
-        timeLeft: 90,
+        timeLeft: 120,
       };
       setRound(newState);
       broadcastUpdate(newState);
@@ -146,8 +147,8 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ isHost, projects, c
       <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col">
         <header className="flex justify-between items-center mb-12 border-b border-white/10 pb-8">
           <div className="flex items-center gap-6">
-            <div className="text-6xl bg-white/5 w-24 h-24 flex items-center justify-center rounded-3xl border-2 border-white/10 shadow-inner">
-              {chefInfo?.avatar || '👨‍🍳'}
+            <div className="bg-white/5 w-24 h-24 flex items-center justify-center rounded-3xl border-2 border-white/10 shadow-inner overflow-hidden">
+              <AvatarDisplay avatar={chefInfo?.avatar || '👨‍🍳'} className="w-16 h-16 text-6xl" />
             </div>
             <div>
               <span className="text-kitchen-hot font-mono text-sm tracking-[0.3em] uppercase mb-2 block">Presentando Estación</span>

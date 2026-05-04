@@ -27,6 +27,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+import AvatarDisplay from '@/components/AvatarDisplay';
 import { Project } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -43,27 +44,27 @@ export default function KitchenPage() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [chefAvatars, setChefAvatars] = useState<Record<string, string>>({});
+  const [cursors, setCursors] = useState<Record<string, any>>({});
+  const [presenceChannel, setPresenceChannel] = useState<any>(null);
 
   useEffect(() => {
     // 0. Recuperar sesión con efecto de entrada fluido
     const savedSession = localStorage.getItem('kitchen-sync-session');
-    if (savedSession) {
-      setSession(JSON.parse(savedSession));
+    const parsedSession = savedSession ? JSON.parse(savedSession) : null;
+    if (parsedSession) {
+      setSession(parsedSession);
     }
     setIsSessionLoaded(true);
 
     // 1. Carga inicial
     const fetchProjects = async () => {
-      console.log('--- KitchenSync: Iniciando carga de proyectos ---');
       const { data, error } = await supabase
         .from('projects')
         .select('*')
         .order('sort_order', { ascending: true });
 
-      if (error) {
-        console.error('KitchenSync Error [Fetch]:', error);
-      } else {
-        console.log('KitchenSync: Proyectos cargados con éxito:', data?.length, 'platos encontrados');
+      if (!error) {
         setProjects(data || []);
       }
       setLoading(false);
@@ -71,45 +72,73 @@ export default function KitchenPage() {
 
     fetchProjects();
 
-    // 2. Suscripción en tiempo real
-    console.log('--- KitchenSync: Conectando con la cocina en vivo ---');
-    const channel = supabase
+    // 2. Suscripción de Proyectos
+    const projectsChannel = supabase
       .channel('public:projects')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'projects',
-        },
-        (payload) => {
-          console.log('--- EVENTO DE COCINA RECIBIDO ---', payload.eventType);
-          
-          if (payload.eventType === 'INSERT') {
-            const newProject = payload.new as Project;
-            setProjects((current) => {
-              if (current.find(p => p.id === newProject.id)) return current;
-              return [...current, newProject].sort((a, b) => a.sort_order - b.sort_order);
-            });
-          } 
-          else if (payload.eventType === 'UPDATE') {
-            const updatedProject = payload.new as Project;
-            setProjects((current) => 
-              current.map(p => p.id === updatedProject.id ? updatedProject : p)
-                     .sort((a, b) => a.sort_order - b.sort_order)
-            );
-          } 
-          else if (payload.eventType === 'DELETE') {
-            setProjects((current) => current.filter(p => p.id === payload.old.id));
-          }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newProject = payload.new as Project;
+          setProjects((current) => {
+            if (current.find(p => p.id === newProject.id)) return current;
+            return [...current, newProject].sort((a, b) => a.sort_order - b.sort_order);
+          });
+        } 
+        else if (payload.eventType === 'UPDATE') {
+          const updatedProject = payload.new as Project;
+          setProjects((current) => 
+            current.map(p => p.id === updatedProject.id ? updatedProject : p)
+                   .sort((a, b) => a.sort_order - b.sort_order)
+          );
+        } 
+        else if (payload.eventType === 'DELETE') {
+          setProjects((current) => current.filter(p => p.id === payload.old.id));
         }
-      )
-      .subscribe((status) => {
-        console.log('KitchenSync: Estado de la conexión:', status);
-      });
+      })
+      .subscribe();
+
+    // 3. Suscripción Única de Presencia
+    const pChannel = supabase.channel('online-chefs', {
+      config: {
+        presence: {
+          key: parsedSession?.name || 'anonymous',
+        },
+      },
+    });
+
+    pChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = pChannel.presenceState();
+        const avatars: Record<string, string> = {};
+        const formattedCursors: Record<string, any> = {};
+        
+        Object.keys(state).forEach((key) => {
+          const presences = state[key] as any[];
+          if (presences && presences.length > 0) {
+            const presence = presences[0];
+            avatars[key] = presence.avatar;
+            
+            // Si no somos nosotros y tiene posición, añadir al mapa de cursores
+            if (key !== parsedSession?.name && presence.x !== undefined) {
+              formattedCursors[key] = {
+                id: key,
+                name: key,
+                avatar: presence.avatar,
+                x: presence.x,
+                y: presence.y
+              };
+            }
+          }
+        });
+        setChefAvatars(avatars);
+        setCursors(formattedCursors);
+      })
+      .subscribe();
+
+    setPresenceChannel(pChannel);
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(projectsChannel);
+      supabase.removeChannel(pChannel);
     };
   }, []);
 
@@ -138,6 +167,9 @@ export default function KitchenPage() {
   const handleClearKitchen = async () => {
     if (!window.confirm('🚨 ¿ESTÁS SEGURO? Esto eliminará TODOS los platos de la cocina de forma permanente.')) return;
     
+    // Actualización optimista para que los contadores se pongan a cero inmediatamente
+    setProjects([]);
+
     const { error } = await supabase
       .from('projects')
       .delete()
@@ -146,6 +178,7 @@ export default function KitchenPage() {
     if (error) {
       console.error('Error clearing kitchen:', error);
       alert('Error al limpiar la cocina');
+      // Si falla, recargar los proyectos (opcional, o dejar que el tiempo real lo maneje)
     }
   };
 
@@ -156,7 +189,11 @@ export default function KitchenPage() {
 
   // Sensores para DND
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Permite clics normales; el arrastre solo inicia tras mover 8px
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -242,11 +279,16 @@ export default function KitchenPage() {
 
   return (
     <main className="min-h-screen bg-kitchen-steel text-white p-8 animate-in fade-in duration-700">
-      <MultiplayerCursors userName={session.name} userAvatar={session.avatar} />
+      <MultiplayerCursors 
+        userName={session.name} 
+        userAvatar={session.avatar} 
+        cursors={cursors}
+        channel={presenceChannel}
+      />
       <header className="max-w-6xl mx-auto mb-12 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-8">
         <div className="flex items-center gap-4">
-          <div className="text-4xl bg-white/5 w-16 h-16 flex items-center justify-center rounded-2xl border border-white/10 shadow-inner">
-            {session.avatar}
+          <div className="bg-white/5 w-16 h-16 flex items-center justify-center rounded-2xl border border-white/10 shadow-inner overflow-hidden">
+            <AvatarDisplay avatar={session.avatar} className="w-12 h-12 text-4xl" />
           </div>
           <div>
             <h1 className="text-4xl font-black tracking-tighter uppercase italic">
@@ -305,25 +347,25 @@ export default function KitchenPage() {
           </span>
         </div>
 
-        {!isHost ? (
-          isReady ? (
-            <div className="flex flex-col items-center justify-center py-32 space-y-6 bg-black/20 rounded-[3rem] border border-white/10 mt-8 animate-in zoom-in duration-500 shadow-2xl">
-              <div className="text-9xl animate-bounce drop-shadow-2xl">🛎️</div>
-              <h2 className="text-4xl font-black italic uppercase text-kitchen-done tracking-tighter">¡Estación Lista!</h2>
-              <p className="text-white/40 font-mono uppercase tracking-[0.3em] text-xs">Esperando el pase del Maître...</p>
-              <button 
-                onClick={() => setIsReady(false)} 
-                className="mt-8 px-6 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all text-[10px] font-mono tracking-widest uppercase border border-white/5"
-              >
-                ← Volver a los fogones
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-col md:flex-row gap-4 mb-4 items-stretch">
-                <div className="flex-1">
-                  <AddDishForm chefId={session.name} />
-                </div>
+        {isReady && !isHost ? (
+          <div className="flex flex-col items-center justify-center py-32 space-y-6 bg-black/20 rounded-[3rem] border border-white/10 mt-8 animate-in zoom-in duration-500 shadow-2xl">
+            <div className="text-9xl animate-bounce drop-shadow-2xl">🛎️</div>
+            <h2 className="text-4xl font-black italic uppercase text-kitchen-done tracking-tighter">¡Estación Lista!</h2>
+            <p className="text-white/40 font-mono uppercase tracking-[0.3em] text-xs">Esperando el pase del Maître...</p>
+            <button 
+              onClick={() => setIsReady(false)} 
+              className="mt-8 px-6 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all text-[10px] font-mono tracking-widest uppercase border border-white/5"
+            >
+              ← Volver a los fogones
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col md:flex-row gap-4 mb-4 items-stretch">
+              <div className="flex-1">
+                <AddDishForm chefId={session.name} />
+              </div>
+              {!isHost && (
                 <button
                   onClick={() => {
                     setIsReady(true);
@@ -339,42 +381,46 @@ export default function KitchenPage() {
                 >
                   <span className="text-2xl">🛎️</span> ¡OÍDO COCINA!
                 </button>
-              </div>
-              
-              {loading ? (
-                <div className="flex justify-center py-20">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-kitchen-cool"></div>
-                </div>
-              ) : (
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleDragEnd}
-                >
-                  <SortableContext
-                    items={projects.filter(p => p.chef_id === session.name).map(p => p.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                      {projects.filter(p => p.chef_id === session.name).length === 0 ? (
-                        <div className="col-span-full text-center py-20 border-2 border-dashed border-white/10 rounded-3xl">
-                          <p className="text-white/40 font-mono">Tu estación está vacía. Empieza a preparar un plato.</p>
-                        </div>
-                      ) : (
-                        projects
-                          .filter(p => p.chef_id === session.name)
-                          .map((project) => (
-                            <SortableDish key={project.id} project={project} />
-                          ))
-                      )}
-                    </div>
-                  </SortableContext>
-                </DndContext>
               )}
-            </>
-          )
-        ) : (
-          <MasterKitchenView projects={projects} />
+            </div>
+            
+            {loading ? (
+              <div className="flex justify-center py-20">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-kitchen-cool"></div>
+              </div>
+            ) : (
+              <>
+                {!isHost ? (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext
+                      items={projects.filter(p => p.chef_id === session.name).map(p => p.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {projects.filter(p => p.chef_id === session.name).length === 0 ? (
+                          <div className="col-span-full text-center py-20 border-2 border-dashed border-white/10 rounded-3xl">
+                            <p className="text-white/40 font-mono">Tu estación está vacía. Empieza a preparar un plato.</p>
+                          </div>
+                        ) : (
+                          projects
+                            .filter(p => p.chef_id === session.name)
+                            .map((project) => (
+                              <SortableDish key={project.id} project={project} />
+                            ))
+                        )}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                ) : (
+                  <MasterKitchenView projects={projects} chefAvatars={chefAvatars} />
+                )}
+              </>
+            )}
+          </>
         )}
 
         <EvaluationRounds 

@@ -1,15 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import DishCard from './DishCard';
+import AvatarDisplay from './AvatarDisplay';
+import { supabase } from '@/lib/supabase';
 import { Project } from '@/lib/types';
 
 interface MasterKitchenViewProps {
   projects: Project[];
+  chefAvatars: Record<string, string>;
 }
 
-const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects }) => {
+const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects, chefAvatars }) => {
   // Agrupar proyectos por chef_id
   const chefs = Array.from(new Set(projects.map((p) => p.chef_id)));
 
@@ -34,8 +37,8 @@ const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects }) => {
             {chefs.map((chefId) => (
               <div key={chefId} className="flex flex-col gap-6">
                 <div className="flex items-center gap-3 border-b border-white/20 pb-4">
-                  <div className="w-10 h-10 bg-kitchen-cool rounded-full flex items-center justify-center font-bold shadow-lg">
-                    {chefId.charAt(0).toUpperCase()}
+                  <div className="w-10 h-10 bg-kitchen-cool rounded-full flex items-center justify-center font-bold shadow-lg overflow-hidden">
+                    <AvatarDisplay avatar={chefAvatars[chefId] || chefId.charAt(0).toUpperCase()} className="w-8 h-8 text-xl" />
                   </div>
                   <div>
                     <h2 className="font-black uppercase tracking-widest text-sm">Estación</h2>
