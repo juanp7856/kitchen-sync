@@ -15,39 +15,51 @@ interface Cursor {
 interface MultiplayerCursorsProps {
   userName: string;
   userAvatar: string;
+  isReady: boolean;
   cursors: Record<string, Cursor>;
   channel: any;
 }
 
-const MultiplayerCursors: React.FC<MultiplayerCursorsProps> = ({ userName, userAvatar, cursors, channel }) => {
+const MultiplayerCursors: React.FC<MultiplayerCursorsProps> = ({ userName, userAvatar, isReady, cursors, channel }) => {
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
   useEffect(() => {
     if (!channel) return;
 
-    let lastUpdate = 0;
-    const throttleMs = 50; 
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const now = Date.now();
-      if (now - lastUpdate < throttleMs) return;
-      lastUpdate = now;
-
-      const x = (e.clientX / window.innerWidth) * 100;
-      const y = (e.clientY / window.innerHeight) * 100;
-      
+    const trackState = (x: number, y: number) => {
       channel.track({
         name: userName,
         avatar: userAvatar,
+        isReady: isReady,
         x,
         y,
       });
     };
 
+    let lastUpdate = 0;
+    const throttleMs = 50; 
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const x = (e.clientX / window.innerWidth) * 100;
+      const y = (e.clientY / window.innerHeight) * 100;
+      setMousePos({ x, y });
+
+      const now = Date.now();
+      if (now - lastUpdate < throttleMs) return;
+      lastUpdate = now;
+
+      trackState(x, y);
+    };
+
     window.addEventListener('mousemove', handleMouseMove);
+
+    // También trackear cuando cambia isReady, incluso si el ratón no se mueve
+    trackState(mousePos.x, mousePos.y);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
     };
-  }, [userName, userAvatar, channel]);
+  }, [userName, userAvatar, isReady, channel]);
 
   return (
     <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">

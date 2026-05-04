@@ -44,7 +44,7 @@ export default function KitchenPage() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const [chefAvatars, setChefAvatars] = useState<Record<string, string>>({});
+  const [chefAvatars, setChefAvatars] = useState<Record<string, { avatar: string; isReady: boolean }>>({});
   const [cursors, setCursors] = useState<Record<string, any>>({});
   const [presenceChannel, setPresenceChannel] = useState<any>(null);
 
@@ -108,14 +108,17 @@ export default function KitchenPage() {
     pChannel
       .on('presence', { event: 'sync' }, () => {
         const state = pChannel.presenceState();
-        const avatars: Record<string, string> = {};
+        const avatars: Record<string, { avatar: string; isReady: boolean }> = {};
         const formattedCursors: Record<string, any> = {};
         
         Object.keys(state).forEach((key) => {
           const presences = state[key] as any[];
           if (presences && presences.length > 0) {
             const presence = presences[0];
-            avatars[key] = presence.avatar;
+            avatars[key] = { 
+              avatar: presence.avatar, 
+              isReady: presence.isReady || false 
+            };
             
             // Si no somos nosotros y tiene posición, añadir al mapa de cursores
             if (key !== parsedSession?.name && presence.x !== undefined) {
@@ -141,6 +144,9 @@ export default function KitchenPage() {
       supabase.removeChannel(pChannel);
     };
   }, []);
+
+  // Sincronizar estado local isReady con presencia se maneja ahora en MultiplayerCursors
+  // para evitar colisiones de track()
 
   useEffect(() => {
     if (!session) return;
@@ -278,80 +284,85 @@ export default function KitchenPage() {
   };
 
   return (
-    <main className="min-h-screen bg-kitchen-steel text-white p-8 animate-in fade-in duration-700">
+    <main className="min-h-screen bg-kitchen-steel text-white p-4 md:p-8 animate-in fade-in duration-700">
       <MultiplayerCursors 
         userName={session.name} 
         userAvatar={session.avatar} 
+        isReady={isReady}
         cursors={cursors}
         channel={presenceChannel}
       />
-      <header className="max-w-6xl mx-auto mb-12 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-8">
+      <header className="max-w-6xl mx-auto mb-8 md:mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/10 pb-8">
         <div className="flex items-center gap-4">
-          <div className="bg-white/5 w-16 h-16 flex items-center justify-center rounded-2xl border border-white/10 shadow-inner overflow-hidden">
-            <AvatarDisplay avatar={session.avatar} className="w-12 h-12 text-4xl" />
+          <div className="bg-white/5 w-12 h-12 md:w-16 md:h-16 flex items-center justify-center rounded-2xl border border-white/10 shadow-inner overflow-hidden flex-shrink-0">
+            <AvatarDisplay avatar={session.avatar} className="w-8 h-8 md:w-12 md:h-12 text-2xl md:text-4xl" />
           </div>
           <div>
-            <h1 className="text-4xl font-black tracking-tighter uppercase italic">
+            <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase italic leading-tight">
               Kitchen<span className="text-kitchen-cool underline">Sync</span>
             </h1>
-            <p className="text-white/60 font-mono text-sm mt-1">
+            <p className="text-white/60 font-mono text-[10px] md:text-sm mt-1">
               CHEF: <span className="text-white font-bold">{session.name.toUpperCase()}</span> | ROL: <span className={isHost ? 'text-kitchen-hot font-bold' : 'text-kitchen-cool font-bold'}>{session.role.toUpperCase()}</span>
             </p>
           </div>
         </div>
 
-        <KitchenTimer isHost={isHost} />
+        <div className="w-full md:w-auto order-3 md:order-2">
+          <KitchenTimer isHost={isHost} />
+        </div>
         
-        <div className="flex items-center gap-4">
-          <div className="flex gap-4">
-            <div className="bg-black/20 p-4 rounded-lg border border-white/5">
-              <span className="block text-[10px] font-mono opacity-50 uppercase">En marcha</span>
-              <span className="text-2xl font-bold">{projects.filter(p => p.status !== 'served').length}</span>
+        <div className="flex items-center justify-between md:justify-end gap-4 md:order-3">
+          <div className="flex gap-2 md:gap-4">
+            <div className="bg-black/20 p-2 md:p-4 rounded-lg border border-white/5 min-w-[70px]">
+              <span className="block text-[8px] md:text-[10px] font-mono opacity-50 uppercase">En marcha</span>
+              <span className="text-xl md:text-2xl font-bold">{projects.filter(p => p.status !== 'served').length}</span>
             </div>
-            <div className="bg-black/20 p-4 rounded-lg border border-white/5">
-              <span className="block text-[10px] font-mono opacity-50 uppercase">Críticos</span>
-              <span className="text-2xl font-bold text-kitchen-hot">{projects.filter(p => p.temp >= 80).length}</span>
+            <div className="bg-black/20 p-2 md:p-4 rounded-lg border border-white/5 min-w-[70px]">
+              <span className="block text-[8px] md:text-[10px] font-mono opacity-50 uppercase">Críticos</span>
+              <span className="text-xl md:text-2xl font-bold text-kitchen-hot">{projects.filter(p => p.temp >= 80).length}</span>
             </div>
           </div>
           
-          {isHost && (
-            <button 
-              onClick={handleClearKitchen}
-              className="p-3 bg-kitchen-hot/10 hover:bg-kitchen-hot text-kitchen-hot hover:text-white rounded-xl border border-kitchen-hot/20 transition-all shadow-sm"
-              title="Borrar todos los platos"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-            </button>
-          )}
+          <div className="flex gap-2">
+            {isHost && (
+              <button 
+                onClick={handleClearKitchen}
+                className="p-3 bg-kitchen-hot/10 hover:bg-kitchen-hot text-kitchen-hot hover:text-white rounded-xl border border-kitchen-hot/20 transition-all shadow-sm"
+                title="Borrar todos los platos"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+              </button>
+            )}
 
-          <button 
-            onClick={handleLogout}
-            className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors"
-            title="Salir de la cocina"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          </button>
+            <button 
+              onClick={handleLogout}
+              className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors"
+              title="Salir de la cocina"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div className="flex bg-black/20 px-4 py-2 rounded-xl border border-white/5">
-             <span className="text-xs font-mono text-white/60 tracking-widest uppercase">
+             <span className="text-[10px] md:text-xs font-mono text-white/60 tracking-widest uppercase text-center w-full">
                {isHost ? 'Panel del Maître' : 'Tu Estación de Trabajo'}
              </span>
           </div>
           
-          <span className="text-xs font-mono text-white/40 tracking-widest uppercase">
+          <span className="hidden sm:block text-[10px] md:text-xs font-mono text-white/40 tracking-widest uppercase">
             {isHost ? 'Navegación Táctica (Zoom/Pan)' : 'Cocinando en Tiempo Real'}
           </span>
         </div>
 
         {isReady && !isHost ? (
-          <div className="flex flex-col items-center justify-center py-32 space-y-6 bg-black/20 rounded-[3rem] border border-white/10 mt-8 animate-in zoom-in duration-500 shadow-2xl">
-            <div className="text-9xl animate-bounce drop-shadow-2xl">🛎️</div>
-            <h2 className="text-4xl font-black italic uppercase text-kitchen-done tracking-tighter">¡Estación Lista!</h2>
-            <p className="text-white/40 font-mono uppercase tracking-[0.3em] text-xs">Esperando el pase del Maître...</p>
+          <div className="flex flex-col items-center justify-center py-16 md:py-32 space-y-6 bg-black/20 rounded-[2rem] md:rounded-[3rem] border border-white/10 mt-8 animate-in zoom-in duration-500 shadow-2xl px-6 text-center">
+            <div className="text-7xl md:text-9xl animate-bounce drop-shadow-2xl">🛎️</div>
+            <h2 className="text-3xl md:text-4xl font-black italic uppercase text-kitchen-done tracking-tighter">¡Estación Lista!</h2>
+            <p className="text-white/40 font-mono uppercase tracking-[0.2em] md:tracking-[0.3em] text-[10px] md:text-xs">Esperando el pase del Maître...</p>
             <button 
               onClick={() => setIsReady(false)} 
               className="mt-8 px-6 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all text-[10px] font-mono tracking-widest uppercase border border-white/5"
@@ -361,8 +372,8 @@ export default function KitchenPage() {
           </div>
         ) : (
           <>
-            <div className="flex flex-col md:flex-row gap-4 mb-4 items-stretch">
-              <div className="flex-1">
+            <div className="flex flex-col md:flex-row gap-4 mb-8 items-stretch">
+              <div className="flex-1 w-full">
                 <AddDishForm chefId={session.name} />
               </div>
               {!isHost && (
@@ -377,9 +388,9 @@ export default function KitchenPage() {
                       payload: { chef: session.name }
                     });
                   }}
-                  className="bg-kitchen-done hover:bg-[#00B843] px-10 py-4 rounded-2xl font-black text-white shadow-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-3 border-2 border-white/20 whitespace-nowrap h-[88px] w-full md:w-auto"
+                  className="bg-kitchen-done hover:bg-[#00B843] px-6 md:px-10 py-4 rounded-2xl font-black text-white shadow-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-3 border-2 border-white/20 whitespace-nowrap h-[70px] md:h-[88px] w-full md:w-auto text-sm md:text-base"
                 >
-                  <span className="text-2xl">🛎️</span> ¡OÍDO COCINA!
+                  <span className="text-xl md:text-2xl">🛎️</span> ¡OÍDO COCINA!
                 </button>
               )}
             </div>

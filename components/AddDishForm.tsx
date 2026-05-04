@@ -42,21 +42,21 @@ const AddDishForm: React.FC<AddDishFormProps> = ({ chefId }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-8 space-y-4 bg-white/5 p-6 rounded-2xl border border-white/10">
-      <div className="flex gap-4 items-end">
-        <div className="flex flex-col gap-2">
-          <label className="text-[10px] font-mono uppercase opacity-50 ml-1">Icono</label>
+    <form onSubmit={handleSubmit} className="mb-4 md:mb-8 space-y-4 bg-white/5 p-4 md:p-6 rounded-2xl border border-white/10">
+      <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
+        <div className="flex flex-row sm:flex-col gap-2 items-center sm:items-start">
+          <label className="text-[10px] font-mono uppercase opacity-50 sm:ml-1">Icono</label>
           <select 
             value={icon} 
             onChange={(e) => setIcon(e.target.value)}
-            className="bg-white/5 border border-white/10 rounded-lg p-2 text-xl focus:outline-none focus:ring-1 focus:ring-kitchen-cool"
+            className="bg-white/5 border border-white/10 rounded-lg p-2 text-xl focus:outline-none focus:ring-1 focus:ring-kitchen-cool flex-1 sm:flex-none"
           >
             {AVATARS.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
 
         <div className="flex flex-col gap-2 flex-1">
-          <label className="text-[10px] font-mono uppercase opacity-50 ml-1">Nombre del Plato</label>
+          <label className="text-[10px] font-mono uppercase opacity-50 sm:ml-1">Nombre del Plato</label>
           <input
             type="text"
             value={title}
@@ -70,7 +70,7 @@ const AddDishForm: React.FC<AddDishFormProps> = ({ chefId }) => {
         <button
           type="submit"
           disabled={loading}
-          className="bg-kitchen-cool hover:bg-blue-600 px-8 py-2 rounded-lg font-bold transition-colors disabled:opacity-50 h-[42px]"
+          className="bg-kitchen-cool hover:bg-blue-600 px-8 py-2 rounded-lg font-bold transition-colors disabled:opacity-50 h-[42px] w-full sm:w-auto mt-2 sm:mt-0"
         >
           {loading ? '...' : 'AÑADIR'}
         </button>
