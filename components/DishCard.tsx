@@ -1,17 +1,9 @@
 import React, { useState } from 'react';
 import EditDishModal from './EditDishModal';
 
-interface ProjectProps {
-  id: string;
-  title: string;
-  status: 'prep' | 'slow' | 'served';
-  temp: number;
-  chef_id: string;
-  icon?: string;
-  sort_order?: number;
-}
+import { Project } from '@/lib/types';
 
-const DishCard: React.FC<{ project: ProjectProps; dragHandleProps?: any; canEdit?: boolean }> = ({ project, dragHandleProps, canEdit }) => {
+const DishCard: React.FC<{ project: Project; dragHandleProps?: any; canEdit?: boolean }> = ({ project, dragHandleProps, canEdit }) => {
   const { title, status, temp, icon } = project;
   const [showEdit, setShowEdit] = useState(false);
 

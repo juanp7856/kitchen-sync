@@ -3,14 +3,7 @@
 import React from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import DishCard from './DishCard';
-
-interface Project {
-  id: string;
-  title: string;
-  status: 'prep' | 'slow' | 'served';
-  temp: number;
-  chef_id: string;
-}
+import { Project } from '@/lib/types';
 
 interface MasterKitchenViewProps {
   projects: Project[];

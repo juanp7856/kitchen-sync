@@ -3,14 +3,10 @@
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
+import { Project } from '@/lib/types';
+
 interface EditDishModalProps {
-  project: {
-    id: string;
-    title: string;
-    status: 'prep' | 'slow' | 'served';
-    temp: number;
-    icon?: string;
-  };
+  project: Project;
   onClose: () => void;
 }
 
