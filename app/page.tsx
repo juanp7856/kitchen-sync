@@ -7,7 +7,6 @@ import AddDishForm from '@/components/AddDishForm';
 import KitchenTimer from '@/components/KitchenTimer';
 import MasterKitchenView from '@/components/MasterKitchenView';
 import AuthScreen from '@/components/auth/AuthScreen';
-import MultiplayerCursors from '@/components/MultiplayerCursors';
 import EvaluationRounds from '@/components/EvaluationRounds';
 import {
   DndContext,
@@ -28,7 +27,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import AvatarDisplay from '@/components/AvatarDisplay';
-import { Project } from '@/lib/types';
+import { Project, KitchenSession } from '@/lib/types';
+import { cloneSession } from '@/lib/sessions';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +36,7 @@ interface UserSession {
   name: string;
   role: 'chef' | 'host';
   avatar: string;
+  email: string;
 }
 
 export default function KitchenPage() {
@@ -45,11 +46,39 @@ export default function KitchenPage() {
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [chefAvatars, setChefAvatars] = useState<Record<string, { avatar: string; isReady: boolean }>>({});
-  const [cursors, setCursors] = useState<Record<string, any>>({});
   const [presenceChannel, setPresenceChannel] = useState<any>(null);
+  const [currentSession, setCurrentSession] = useState<KitchenSession | null>(null);
+
+  const [historicalProjects, setHistoricalProjects] = useState<Project[]>([]);
+
+  // Carga de proyectos por sesión
+  const fetchProjects = async (sessionId: string) => {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('sort_order', { ascending: true });
+
+    if (!error && data) {
+      setProjects(data || []);
+      
+      // Buscar históricos si hay parent_ids
+      const parentIds = data.map(p => p.parent_id).filter(Boolean);
+      if (parentIds.length > 0) {
+        const { data: historical } = await supabase
+          .from('projects')
+          .select('*')
+          .in('id', parentIds);
+        setHistoricalProjects(historical || []);
+      } else {
+        setHistoricalProjects([]);
+      }
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    // 0. Recuperar sesión con efecto de entrada fluido
+    // 0. Recuperar sesión
     const savedSession = localStorage.getItem('kitchen-sync-session');
     const parsedSession = savedSession ? JSON.parse(savedSession) : null;
     if (parsedSession) {
@@ -57,27 +86,52 @@ export default function KitchenPage() {
     }
     setIsSessionLoaded(true);
 
-    // 1. Carga inicial
-    const fetchProjects = async () => {
+    // 1. Cargar Sesión Activa
+    const fetchActiveSession = async () => {
       const { data, error } = await supabase
-        .from('projects')
+        .from('sessions')
         .select('*')
-        .order('sort_order', { ascending: true });
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
 
-      if (!error) {
-        setProjects(data || []);
+      if (!error && data) {
+        setCurrentSession(data);
+        fetchProjects(data.id);
+      } else {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    fetchProjects();
+    fetchActiveSession();
 
-    // 2. Suscripción de Proyectos
+    // Suscribirse a cambios en sesiones
+    const sessionsChannel = supabase
+      .channel('public:sessions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, (payload) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const s = payload.new as KitchenSession;
+          if (s.status === 'active') {
+            setCurrentSession(s);
+            fetchProjects(s.id);
+          } else if (currentSession?.id === s.id) {
+            setCurrentSession(null);
+            setProjects([]);
+          }
+        }
+      })
+      .subscribe();
+
+    // 2. Suscripción de Proyectos (SINCRONIZACIÓN REAL-TIME)
     const projectsChannel = supabase
       .channel('public:projects')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, (payload) => {
         if (payload.eventType === 'INSERT') {
           const newProject = payload.new as Project;
+          // Validar que pertenezca a la sesión actual
+          if (currentSession && newProject.session_id !== currentSession.id) return;
+
           setProjects((current) => {
             if (current.find(p => p.id === newProject.id)) return current;
             return [...current, newProject].sort((a, b) => a.sort_order - b.sort_order);
@@ -85,18 +139,30 @@ export default function KitchenPage() {
         } 
         else if (payload.eventType === 'UPDATE') {
           const updatedProject = payload.new as Project;
+          if (currentSession && updatedProject.session_id !== currentSession.id) return;
+
           setProjects((current) => 
             current.map(p => p.id === updatedProject.id ? updatedProject : p)
                    .sort((a, b) => a.sort_order - b.sort_order)
           );
         } 
         else if (payload.eventType === 'DELETE') {
-          setProjects((current) => current.filter(p => p.id === payload.old.id));
+          // IMPORTANTE: En DELETE, payload.new es null y payload.old solo contiene el ID
+          const deletedId = payload.old.id;
+          setProjects((current) => current.filter(p => p.id !== deletedId));
         }
       })
       .subscribe();
 
-    // 3. Suscripción Única de Presencia
+    // 3. Suscripción de Señales Globales (Borrado Masivo, etc)
+    const signalChannel = supabase
+      .channel('kitchen-signals')
+      .on('broadcast', { event: 'kitchen-cleared' }, () => {
+        setProjects([]);
+      })
+      .subscribe();
+
+    // 3. Suscripción de Presencia (SIN CURSORES)
     const pChannel = supabase.channel('online-chefs', {
       config: {
         presence: {
@@ -109,44 +175,84 @@ export default function KitchenPage() {
       .on('presence', { event: 'sync' }, () => {
         const state = pChannel.presenceState();
         const avatars: Record<string, { avatar: string; isReady: boolean }> = {};
-        const formattedCursors: Record<string, any> = {};
         
         Object.keys(state).forEach((key) => {
           const presences = state[key] as any[];
           if (presences && presences.length > 0) {
-            const presence = presences[0];
-            avatars[key] = { 
-              avatar: presence.avatar, 
-              isReady: presence.isReady || false 
-            };
-            
-            // Si no somos nosotros y tiene posición, añadir al mapa de cursores
-            if (key !== parsedSession?.name && presence.x !== undefined) {
-              formattedCursors[key] = {
-                id: key,
-                name: key,
-                avatar: presence.avatar,
-                x: presence.x,
-                y: presence.y
+            const presence = presences[presences.length - 1];
+            if (presence.avatar) {
+              avatars[key] = { 
+                avatar: presence.avatar, 
+                isReady: !!presence.isReady 
               };
             }
           }
         });
-        setChefAvatars(avatars);
-        setCursors(formattedCursors);
+        
+        setChefAvatars({ ...avatars });
       })
-      .subscribe();
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED' && parsedSession) {
+          await pChannel.track({
+            name: parsedSession.name,
+            avatar: parsedSession.avatar,
+            isReady: false
+          });
+        }
+      });
 
     setPresenceChannel(pChannel);
 
     return () => {
       supabase.removeChannel(projectsChannel);
       supabase.removeChannel(pChannel);
+      supabase.removeChannel(sessionsChannel);
     };
+  }, [currentSession?.id]);
+
+  const [suggestedSession, setSuggestedSession] = useState<'monday' | 'friday'>('monday');
+
+  useEffect(() => {
+    // Sugerir tipo de sesión según el día
+    const day = new Date().getDay();
+    if (day >= 4 || day === 0) { // Jueves a Domingo sugerimos Viernes
+      setSuggestedSession('friday');
+    } else {
+      setSuggestedSession('monday');
+    }
   }, []);
 
-  // Sincronizar estado local isReady con presencia se maneja ahora en MultiplayerCursors
-  // para evitar colisiones de track()
+  // Sincronizar estado de "LISTO" con presencia
+  useEffect(() => {
+    if (presenceChannel && session) {
+      presenceChannel.track({
+        name: session.name,
+        avatar: session.avatar,
+        isReady: isReady
+      });
+    }
+  }, [isReady, presenceChannel, session]);
+
+  const handleCreateSession = async (type: 'monday' | 'friday') => {
+    setLoading(true);
+    
+    // 1. Cerrar sesiones anteriores
+    await supabase
+      .from('sessions')
+      .update({ status: 'closed' })
+      .eq('status', 'active');
+
+    // 2. Crear nueva sesión
+    const newSession = await cloneSession(type);
+
+    if (newSession) {
+      setCurrentSession(newSession);
+      fetchProjects(newSession.id);
+    } else {
+      alert('Error al crear la sesión');
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
     if (!session) return;
@@ -170,34 +276,58 @@ export default function KitchenPage() {
     localStorage.setItem('kitchen-sync-session', JSON.stringify(userData));
   };
 
-  const handleClearKitchen = async () => {
-    if (!window.confirm('🚨 ¿ESTÁS SEGURO? Esto eliminará TODOS los platos de la cocina de forma permanente.')) return;
-    
-    // Actualización optimista para que los contadores se pongan a cero inmediatamente
-    setProjects([]);
+  const handleCloseSession = async () => {
+    if (!currentSession) return;
+    if (!window.confirm('🚨 ¿CERRAR COCINA? Esto archivará la sesión actual y todos los chefs volverán a la sala de espera.')) return;
 
+    setLoading(true);
+    const { error } = await supabase
+      .from('sessions')
+      .update({ status: 'closed' })
+      .eq('id', currentSession.id);
+
+    if (error) {
+      alert('Error al cerrar la sesión');
+    } else {
+      setCurrentSession(null);
+      setProjects([]);
+    }
+    setLoading(false);
+  };
+
+  const handleClearKitchen = async () => {
+    if (!window.confirm('🚨 ¿ESTÁS SEGURO? Esto eliminará TODOS los platos de la sesión actual.')) return;
+    
+    // 1. Borrar de la DB
     const { error } = await supabase
       .from('projects')
       .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000');
+      .eq('session_id', currentSession?.id);
 
     if (error) {
-      console.error('Error clearing kitchen:', error);
       alert('Error al limpiar la cocina');
-      // Si falla, recargar los proyectos (opcional, o dejar que el tiempo real lo maneje)
+    } else {
+      // 2. Notificar a todos por broadcast para limpieza instantánea
+      supabase.channel('kitchen-signals').send({
+        type: 'broadcast',
+        event: 'kitchen-cleared',
+        payload: {}
+      });
+      // 3. Limpiar estado local propio
+      setProjects([]);
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     localStorage.removeItem('kitchen-sync-session');
     setSession(null);
   };
 
-  // Sensores para DND
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8, // Permite clics normales; el arrastre solo inicia tras mover 8px
+        distance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -213,13 +343,8 @@ export default function KitchenPage() {
       const newIndex = projects.findIndex((p) => p.id === over.id);
 
       const newOrder = arrayMove(projects, oldIndex, newIndex);
-      
-      // Actualización optimista del estado local
       setProjects(newOrder);
 
-      // Actualizar en Supabase (solo los afectados para ser eficientes)
-      // En un MVP simple, podemos actualizar el sort_order del elemento movido
-      // basándonos en sus vecinos.
       const movedItem = newOrder[newIndex];
       const prevItem = newOrder[newIndex - 1];
       const nextItem = newOrder[newIndex + 1];
@@ -229,12 +354,10 @@ export default function KitchenPage() {
       else if (!nextItem) finalSortOrder = prevItem.sort_order + 1000;
       else finalSortOrder = (prevItem.sort_order + nextItem.sort_order) / 2;
 
-      const { error } = await supabase
+      await supabase
         .from('projects')
         .update({ sort_order: finalSortOrder })
         .eq('id', movedItem.id);
-
-      if (error) console.error('Error actualizando orden:', error);
     }
   };
 
@@ -254,7 +377,6 @@ export default function KitchenPage() {
 
   const isHost = session.role === 'host';
 
-  // Componente interno para platos arrastrables
   const SortableDish = ({ project }: { project: Project }) => {
     const {
       attributes,
@@ -285,13 +407,6 @@ export default function KitchenPage() {
 
   return (
     <main className="min-h-screen bg-kitchen-steel text-white p-4 md:p-8 animate-in fade-in duration-700">
-      <MultiplayerCursors 
-        userName={session.name} 
-        userAvatar={session.avatar} 
-        isReady={isReady}
-        cursors={cursors}
-        channel={presenceChannel}
-      />
       <header className="max-w-6xl mx-auto mb-8 md:mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/10 pb-8">
         <div className="flex items-center gap-4">
           <div className="bg-white/5 w-12 h-12 md:w-16 md:h-16 flex items-center justify-center rounded-2xl border border-white/10 shadow-inner overflow-hidden flex-shrink-0">
@@ -325,13 +440,24 @@ export default function KitchenPage() {
           
           <div className="flex gap-2">
             {isHost && (
-              <button 
-                onClick={handleClearKitchen}
-                className="p-3 bg-kitchen-hot/10 hover:bg-kitchen-hot text-kitchen-hot hover:text-white rounded-xl border border-kitchen-hot/20 transition-all shadow-sm"
-                title="Borrar todos los platos"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-              </button>
+              <>
+                <button 
+                  onClick={handleCloseSession}
+                  className="p-3 bg-white/5 hover:bg-kitchen-hot/20 text-white hover:text-kitchen-hot rounded-xl border border-white/10 transition-all shadow-sm flex items-center gap-2 group"
+                  title="Cerrar cocina y archivar sesión"
+                >
+                  <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Cerrar Cocina</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                </button>
+
+                <button 
+                  onClick={handleClearKitchen}
+                  className="p-3 bg-kitchen-hot/10 hover:bg-kitchen-hot text-kitchen-hot hover:text-white rounded-xl border border-kitchen-hot/20 transition-all shadow-sm"
+                  title="Borrar platos de la sesión"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                </button>
+              </>
             )}
 
             <button 
@@ -354,11 +480,34 @@ export default function KitchenPage() {
           </div>
           
           <span className="hidden sm:block text-[10px] md:text-xs font-mono text-white/40 tracking-widest uppercase">
-            {isHost ? 'Navegación Táctica (Zoom/Pan)' : 'Cocinando en Tiempo Real'}
+            Cocinando en Tiempo Real
           </span>
         </div>
 
-        {isReady && !isHost ? (
+        {!currentSession ? (
+          <div className="flex flex-col items-center justify-center py-20 bg-black/20 rounded-[3rem] border-2 border-dashed border-white/10 animate-in fade-in zoom-in duration-700">
+            <div className="text-8xl mb-8">🏪</div>
+            <h2 className="text-4xl font-black italic uppercase text-white/40 tracking-tighter mb-4 text-center px-6">La cocina está cerrada</h2>
+            {isHost ? (
+              <div className="flex flex-col sm:flex-row gap-6 mt-8">
+                <button 
+                  onClick={() => handleCreateSession('monday')}
+                  className={`${suggestedSession === 'monday' ? 'bg-kitchen-cool scale-105 ring-4 ring-blue-400/30' : 'bg-white/10 opacity-50'} hover:bg-kitchen-cool px-10 py-6 rounded-3xl font-black text-xl shadow-2xl transition-all transform active:scale-95 border-2 border-white/20`}
+                >
+                  📅 ABRIR LUNES {suggestedSession === 'monday' && '✨'}
+                </button>
+                <button 
+                  onClick={() => handleCreateSession('friday')}
+                  className={`${suggestedSession === 'friday' ? 'bg-kitchen-hot scale-105 ring-4 ring-red-400/30' : 'bg-white/10 opacity-50'} hover:bg-kitchen-hot px-10 py-6 rounded-3xl font-black text-xl shadow-2xl transition-all transform active:scale-95 border-2 border-white/20`}
+                >
+                  🥂 ABRIR VIERNES {suggestedSession === 'friday' && '✨'}
+                </button>
+              </div>
+            ) : (
+              <p className="text-white/20 font-mono uppercase tracking-[0.3em] text-xs">Esperando a que el Maître abra la sesión...</p>
+            )}
+          </div>
+        ) : isReady && !isHost ? (
           <div className="flex flex-col items-center justify-center py-16 md:py-32 space-y-6 bg-black/20 rounded-[2rem] md:rounded-[3rem] border border-white/10 mt-8 animate-in zoom-in duration-500 shadow-2xl px-6 text-center">
             <div className="text-7xl md:text-9xl animate-bounce drop-shadow-2xl">🛎️</div>
             <h2 className="text-3xl md:text-4xl font-black italic uppercase text-kitchen-done tracking-tighter">¡Estación Lista!</h2>
@@ -372,9 +521,15 @@ export default function KitchenPage() {
           </div>
         ) : (
           <>
+            <div className="flex justify-center mb-12">
+               <div className={`px-6 py-2 rounded-full border-2 font-black text-sm uppercase tracking-widest animate-pulse ${currentSession.type === 'monday' ? 'bg-kitchen-cool/20 border-kitchen-cool text-kitchen-cool' : 'bg-kitchen-hot/20 border-kitchen-hot text-kitchen-hot'}`}>
+                 {currentSession.type === 'monday' ? '🗓️ Sesión de Planificación (Lunes)' : '🏆 Sesión de Resultados (Viernes)'}
+               </div>
+            </div>
+
             <div className="flex flex-col md:flex-row gap-4 mb-8 items-stretch">
               <div className="flex-1 w-full">
-                <AddDishForm chefId={session.name} />
+                <AddDishForm chefId={session.name} sessionId={currentSession.id} />
               </div>
               {!isHost && (
                 <button
@@ -437,7 +592,8 @@ export default function KitchenPage() {
         <EvaluationRounds 
           isHost={isHost} 
           projects={projects} 
-          currentUser={{ name: session.name, avatar: session.avatar }} 
+          historicalProjects={historicalProjects}
+          currentUser={{ name: session.name, avatar: session.avatar, email: session.email }} 
         />
       </div>
     </main>

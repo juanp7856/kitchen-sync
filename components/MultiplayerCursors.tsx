@@ -21,23 +21,27 @@ interface MultiplayerCursorsProps {
 }
 
 const MultiplayerCursors: React.FC<MultiplayerCursorsProps> = ({ userName, userAvatar, isReady, cursors, channel }) => {
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [mousePos, setMousePos] = useState({ x: 50, y: 50 });
 
   useEffect(() => {
     if (!channel) return;
 
-    const trackState = (x: number, y: number) => {
-      channel.track({
-        name: userName,
-        avatar: userAvatar,
-        isReady: isReady,
-        x,
-        y,
-      });
+    const trackState = async (x: number, y: number) => {
+      try {
+        await channel.track({
+          name: userName,
+          avatar: userAvatar,
+          isReady: isReady,
+          x,
+          y,
+        });
+      } catch (err) {
+        // Silently ignore tracking errors during connection transitions
+      }
     };
 
     let lastUpdate = 0;
-    const throttleMs = 50; 
+    const throttleMs = 80; // Un poco más de throttle para no saturar
 
     const handleMouseMove = (e: MouseEvent) => {
       const x = (e.clientX / window.innerWidth) * 100;
@@ -53,7 +57,7 @@ const MultiplayerCursors: React.FC<MultiplayerCursorsProps> = ({ userName, userA
 
     window.addEventListener('mousemove', handleMouseMove);
 
-    // También trackear cuando cambia isReady, incluso si el ratón no se mueve
+    // Trackear cambio de estado (isReady)
     trackState(mousePos.x, mousePos.y);
 
     return () => {

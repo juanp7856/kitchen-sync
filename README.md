@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# KitchenSync 👨‍🍳🔥
 
-## Getting Started
+**KitchenSync** es una herramienta interna de sincronización y gestión de proyectos diseñada para equipos de alto rendimiento. Utiliza una metáfora de cocina para hacer que el seguimiento del trabajo semanal sea lúdico, visual y extremadamente eficiente.
 
-First, run the development server:
+## 🚀 Propósito del Proyecto
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+El sistema está diseñado para manejar el ciclo de vida de la semana laboral en dos momentos clave:
+1.  **Lunes (Planificación):** Apertura de la cocina donde los chefs (desarrolladores/miembros del equipo) cargan sus "platos" (proyectos/tareas).
+2.  **Viernes (Resultados):** Cierre de la cocina donde se evalúa el progreso, se cierran platos servidos y se obtiene trazabilidad del avance semanal.
+
+## 🛠️ Arquitectura Técnica
+
+*   **Framework:** Next.js 16 (App Router)
+*   **Base de Datos & Real-time:** Supabase (PostgreSQL + Realtime Presence/Broadcast)
+*   **Testing:** Vitest + React Testing Library (Flujo TDD)
+*   **Estilos:** Tailwind CSS 4
+*   **Versionamiento:** Sistema de Snapshot Cloning para trazabilidad de sesiones.
+
+## 📋 Flujo de Funcionamiento (Mermaid)
+
+```mermaid
+sequenceDiagram
+    participant H as Host (Maître)
+    participant DB as Supabase
+    participant C as Chefs (Equipo)
+
+    Note over H, C: Inicio de Semana (Lunes)
+    H->>DB: Abrir Sesión Lunes
+    C->>DB: Agregar Platos (V1)
+    DB-->>H: Sincronización en tiempo real
+
+    Note over H, C: Durante la Semana
+    C->>DB: Actualizar Temperatura/Estado
+
+    Note over H, C: Fin de Semana (Viernes)
+    H->>DB: Abrir Sesión Viernes
+    DB->>DB: Clonar Platos Lunes -> Viernes (V2)
+    DB-->>C: Mostrar Platos Clonados (Snapshot)
+    H->>C: Iniciar Rondas de Evaluación
+    C->>H: Feedback con Timer Social (30s) + Técnico (120s)
+    H->>DB: Cerrar Cocina (Archivo)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## ✨ Funcionalidades Clave
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 1. Sistema de Sesiones & Trazabilidad
+- **Snapshot Cloning:** Al abrir una sesión de viernes, el sistema busca los platos del lunes anterior y los clona automáticamente incrementando su versión.
+- **Trazabilidad Total:** Cada plato mantiene una referencia a su "padre" original, permitiendo comparar el inicio vs. el fin de semana.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 2. Autenticación con Roles
+- **Maître (Host):** Control absoluto, puede abrir/cerrar sesiones, iniciar rondas y limpiar la cocina. Usa Magic Link por seguridad.
+- **Chefs:** Acceso fluido. Entran directo con su email y nombre para evitar fricciones de servidor de correo durante las reuniones.
 
-## Learn More
+### 3. Sincronización Real-time "Oído Cocina"
+- **Presence:** Contador de chefs conectados y listos en tiempo real.
+- **Broadcast:** Señales instantáneas para borrado masivo y notificaciones de estado "Listo".
+- **Real-time DB:** Los cambios en platos se reflejan en milisegundos para todos los usuarios.
 
-To learn more about Next.js, take a look at the following resources:
+### 4. Timer de Evaluación de Dos Fases
+- **Fase Social (30s):** Tiempo dedicado a hablar de lo personal (finde, planes, estado de ánimo).
+- **Fase Técnica (120s):** Tiempo dedicado a la presentación del plato/proyecto.
+- Transición automática y campana de aviso.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🧪 Calidad y Robustez
+El proyecto cuenta con una suite de tests automatizados que aseguran:
+- **Seguridad:** Protección de rutas y controles de Host.
+- **Integridad:** Trazabilidad de versiones durante la clonación.
+- **Concurrencia:** Resistencia a race conditions cuando múltiples chefs interactúan simultáneamente.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---

@@ -5,11 +5,12 @@ import { supabase } from '@/lib/supabase';
 
 interface AddDishFormProps {
   chefId: string;
+  sessionId: string;
 }
 
 const AVATARS = ['🍳', '🍕', '🍔', '🌮', '🥗', '🥘', '🍜', '🍰', '☕', '🥤'];
 
-const AddDishForm: React.FC<AddDishFormProps> = ({ chefId }) => {
+const AddDishForm: React.FC<AddDishFormProps> = ({ chefId, sessionId }) => {
   const [title, setTitle] = useState('');
   const [icon, setIcon] = useState(AVATARS[0]);
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,8 @@ const AddDishForm: React.FC<AddDishFormProps> = ({ chefId }) => {
           temp: 20, 
           chef_id: chefId,
           icon,
-          sort_order: Date.now()
+          sort_order: Date.now(),
+          session_id: sessionId
         }
       ]);
 

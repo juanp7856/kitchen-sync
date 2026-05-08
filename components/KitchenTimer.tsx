@@ -36,6 +36,21 @@ const KitchenTimer: React.FC<KitchenTimerProps> = ({ isHost }) => {
       interval = setInterval(() => {
         setSeconds((prev) => {
           const next = prev - 1;
+          
+          if (next <= 0) {
+            setIsActive(false);
+            if (isHost) {
+              playBell();
+              // Emitir el estado final de 0
+              supabase.channel('room-timer').send({
+                type: 'broadcast',
+                event: 'timer-update',
+                payload: { seconds: 0, isActive: false },
+              });
+            }
+            return 0;
+          }
+
           // El host emite el estado actual para sincronizar
           if (isHost && next % 2 === 0) { // Emitir cada 2 segundos para ahorrar ancho de banda
             supabase.channel('room-timer').send({
@@ -47,7 +62,7 @@ const KitchenTimer: React.FC<KitchenTimerProps> = ({ isHost }) => {
           return next;
         });
       }, 1000);
-    } else if (seconds === 0) {
+    } else if (seconds <= 0 && isActive) {
       setIsActive(false);
       if (isHost) playBell();
     }
