@@ -79,7 +79,7 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historica
           return { ...prev, timeLeft: nextTime };
         });
       }, 1000);
-    } else if (round?.timeLeft <= 0 && round?.isActive) {
+    } else if (round && round.isActive && round.timeLeft <= 0) {
       if (isHost) playBell();
     }
     return () => clearInterval(interval);
