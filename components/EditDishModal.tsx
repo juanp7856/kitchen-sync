@@ -45,21 +45,22 @@ const EditDishModal: React.FC<EditDishModalProps> = ({ project, onClose }) => {
         </div>
 
         <div className="space-y-8">
-          {/* Selector de Temperatura */}
+          {/* Selector de Estado / Temperatura */}
           <div className="space-y-3">
-            <label className="text-[10px] font-mono uppercase opacity-50 tracking-widest">Ajustar Fuego (Urgencia)</label>
-            <div className="grid grid-cols-3 gap-2">
+            <label className="text-[10px] font-mono uppercase opacity-50 tracking-widest">Ajustar Fuego / Estado</label>
+            <div className="grid grid-cols-2 gap-2">
               {[
-                { label: 'CONGELADO', temp: 20, icon: '🧊', color: 'bg-kitchen-cool' },
-                { label: 'SLOW COOK', temp: 60, icon: '🥘', color: 'bg-kitchen-warm' },
-                { label: '¡QUEMÁNDOSE!', temp: 100, icon: '🔥', color: 'bg-kitchen-hot' }
+                { label: 'CONGELADO', temp: 20, status: 'cooking', icon: '🧊', color: 'bg-kitchen-cool' },
+                { label: 'SLOW COOK', temp: 60, status: 'cooking', icon: '🥘', color: 'bg-kitchen-warm' },
+                { label: '¡QUEMÁNDOSE!', temp: 100, status: 'cooking', icon: '🔥', color: 'bg-kitchen-hot' },
+                { label: 'SERVIDO', temp: 0, status: 'served', icon: '✅', color: 'bg-kitchen-done' }
               ].map((t) => (
                 <button
-                  key={t.temp}
+                  key={t.label}
                   disabled={loading}
-                  onClick={() => updateProject({ temp: t.temp })}
+                  onClick={() => updateProject({ temp: t.temp, status: t.status })}
                   className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
-                    project.temp === t.temp 
+                    (project.status === 'served' ? t.status === 'served' : (project.temp === t.temp && t.status !== 'served'))
                       ? `${t.color} border-white shadow-lg scale-105` 
                       : 'bg-white/5 border-white/10 hover:bg-white/10 opacity-40 hover:opacity-100'
                   }`}

@@ -1,14 +1,12 @@
 export interface Project {
   id: string;
   title: string;
-  status: 'prep' | 'slow' | 'served';
+  status: 'prep' | 'slow' | 'served' | 'cooking';
   temp: number;
   chef_id: string;
   icon?: string;
   sort_order: number;
   session_id?: string;
-  parent_id?: string;
-  version: number;
 }
 
 export interface KitchenSession {

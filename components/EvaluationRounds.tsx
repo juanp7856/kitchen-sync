@@ -169,9 +169,9 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historica
   };
 
   return (
-    <div className="fixed inset-0 z-[200] bg-kitchen-steel flex flex-col p-8 animate-in fade-in duration-500 overflow-y-auto">
-      <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col">
-        <header className="flex justify-between items-center mb-12 border-b border-white/10 pb-8">
+    <div className="fixed inset-0 z-[200] bg-kitchen-steel flex flex-col animate-in fade-in duration-500 overflow-y-auto">
+      <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col p-8">
+        <header className="sticky top-0 z-50 bg-kitchen-steel/80 backdrop-blur-md flex justify-between items-center mb-12 border-b border-white/10 pb-8 -mx-8 px-8">
           <div className="flex items-center gap-6">
             <div className={`w-24 h-24 flex items-center justify-center rounded-3xl border-2 shadow-inner overflow-hidden transition-colors ${round.phase === 'social' ? 'bg-kitchen-hot/20 border-kitchen-hot' : 'bg-white/5 border-white/10'}`}>
               <AvatarDisplay avatar={chefInfo?.avatar || '👨‍🍳'} className="w-16 h-16 text-6xl" />
@@ -207,42 +207,91 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historica
           </div>
         </header>
 
-        <div className="flex-1">
-          <h3 className="text-white/40 font-mono text-xs uppercase tracking-[0.5em] mb-8 text-center">Evolución de Platos</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            {chefProjects.map(project => {
-              const historical = historicalProjects.find(h => h.id === project.parent_id);
-              
-              return (
-                <div key={project.id} className="bg-black/20 p-6 rounded-[2rem] border border-white/5 space-y-4">
-                  <div className="flex justify-between items-center px-2">
-                     <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest">
-                       {historical ? 'Comparativa Lunes vs Viernes' : 'Plato Nuevo (V1)'}
-                     </span>
-                     {project.version > 1 && (
-                        <span className="bg-kitchen-cool text-[10px] px-2 py-0.5 rounded-full font-black italic">V{project.version}</span>
-                     )}
-                  </div>
-                  
-                  <div className="flex flex-col sm:flex-row gap-4 items-center justify-center">
-                    {historical && (
-                      <>
-                        <div className="opacity-40 scale-90 grayscale contrast-125">
-                          <div className="text-[8px] font-mono text-center mb-1 uppercase tracking-tighter">Lunes (V1)</div>
-                          <DishCard project={historical} canEdit={false} />
-                        </div>
-                        <div className="text-3xl animate-pulse text-white/20 hidden sm:block">➡️</div>
-                        <div className="sm:hidden text-2xl text-white/20">⬇️</div>
-                      </>
-                    )}
-                    <div className="transform scale-105 shadow-2xl">
-                      {historical && <div className="text-[8px] font-mono text-center mb-1 uppercase tracking-tighter text-kitchen-cool font-bold">Viernes (V2)</div>}
-                      <DishCard project={project} canEdit={false} />
-                    </div>
-                  </div>
+        <div className="flex-1 flex flex-col items-center">
+          <h3 className="text-white/40 font-mono text-[10px] uppercase tracking-[0.5em] mb-12">Menú de la Estación</h3>
+          
+          <div className="w-full max-w-4xl bg-black/40 backdrop-blur-md rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden mb-12">
+            <div className="p-8 border-b border-white/5 bg-white/5 flex justify-between items-center">
+              <span className="font-mono text-xs text-white/40 uppercase tracking-widest">Platos en Producción</span>
+              <span className="bg-kitchen-cool/20 text-kitchen-cool px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter border border-kitchen-cool/20">
+                Total: {chefProjects.length}
+              </span>
+            </div>
+
+            <div className="divide-y divide-white/5 p-4 sm:p-8">
+              {chefProjects.length === 0 ? (
+                <div className="py-20 text-center opacity-20 font-mono italic">
+                  Este chef no tiene platos en su estación hoy.
                 </div>
-              );
-            })}
+              ) : (
+                chefProjects.map(project => {
+                  const historical = historicalProjects.find(
+                    h => h.title.toLowerCase() === project.title.toLowerCase() && h.chef_id === project.chef_id
+                  );
+                  
+                  const hasChanged = historical && (historical.status !== project.status || historical.temp !== project.temp);
+
+                  return (
+                    <div key={project.id} className="py-10 first:pt-4 last:pb-4 group">
+                      <div className="flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
+                        {/* Info del Plato */}
+                        <div className="flex-1 text-center lg:text-left">
+                          <div className="flex items-center justify-center lg:justify-start gap-3 mb-2">
+                            <span className="text-3xl">{project.icon}</span>
+                            <h4 className="text-2xl font-black italic uppercase tracking-tighter">{project.title}</h4>
+                          </div>
+                          <div className="flex items-center justify-center lg:justify-start gap-2">
+                            <span className={`text-[10px] font-mono uppercase tracking-[0.2em] ${hasChanged ? 'text-kitchen-warm font-bold' : 'text-white/30'}`}>
+                              {!historical 
+                                ? '✨ Nueva Creación' 
+                                : hasChanged 
+                                  ? '👨‍🍳 Plato Retocado' 
+                                  : '🍲 Receta Original'}
+                            </span>
+                            {hasChanged && (
+                              <span className="flex h-2 w-2 rounded-full bg-kitchen-warm animate-ping"></span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Comparativa Visual */}
+                        <div className="flex items-center gap-6 sm:gap-10">
+                          {historical ? (
+                            <>
+                              <div className="relative group/old">
+                                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-mono text-white/20 uppercase tracking-widest whitespace-nowrap">Mise en place (Lun)</div>
+                                <div className={`transition-all ${hasChanged ? 'opacity-30 scale-90 grayscale contrast-125' : 'opacity-20 scale-90 grayscale'}`}>
+                                  <DishCard project={historical} canEdit={false} />
+                                </div>
+                              </div>
+                              
+                              <div className="flex flex-col items-center gap-1">
+                                <div className={`text-xl transition-colors ${hasChanged ? 'text-kitchen-warm animate-pulse' : 'text-white/5'}`}>➡️</div>
+                                {hasChanged && <span className="text-[8px] font-black text-kitchen-warm uppercase animate-pulse">Sabor</span>}
+                              </div>
+
+                              <div className="relative group/new">
+                                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-mono text-kitchen-cool uppercase tracking-widest whitespace-nowrap font-bold">Al Pase (Vie)</div>
+                                <div className={`transition-transform ${hasChanged ? 'scale-100 shadow-2xl group-hover/new:scale-105' : 'scale-95 opacity-80'}`}>
+                                  <DishCard project={project} canEdit={false} />
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="relative group/new">
+                               <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-mono text-white/20 uppercase tracking-widest whitespace-nowrap">Especial del Día</div>
+                               <div className="scale-105 shadow-2xl">
+                                 <DishCard project={project} canEdit={false} />
+                               </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
 

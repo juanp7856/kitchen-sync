@@ -51,9 +51,8 @@ export async function cloneSession(type: 'monday' | 'friday'): Promise<KitchenSe
         chef_id: project.chef_id,
         icon: project.icon,
         sort_order: project.sort_order,
-        session_id: newSession.id,
-        parent_id: project.id, // The current project becomes the parent
-        version: project.version + 1,
+        session_id: newSession.id
+        // version and parent_id removed as they are not in the DB schema
       }));
 
       const { error: insertError } = await supabase
@@ -61,7 +60,14 @@ export async function cloneSession(type: 'monday' | 'friday'): Promise<KitchenSe
         .insert(clonedProjects);
 
       if (insertError) {
-        console.error('Error inserting cloned projects:', insertError);
+        console.error('Error inserting cloned projects:', {
+          error: insertError,
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint,
+          code: insertError.code,
+          payload: clonedProjects
+        });
       }
     }
   }

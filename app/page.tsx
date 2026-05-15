@@ -62,16 +62,26 @@ export default function KitchenPage() {
     if (!error && data) {
       setProjects(data || []);
       
-      // Buscar históricos si hay parent_ids
-      const parentIds = data.map(p => p.parent_id).filter(Boolean);
-      if (parentIds.length > 0) {
-        const { data: historical } = await supabase
-          .from('projects')
-          .select('*')
-          .in('id', parentIds);
-        setHistoricalProjects(historical || []);
-      } else {
-        setHistoricalProjects([]);
+      // Buscar históricos por NOMBRE y CHEF (ya que no hay parent_id en la BD)
+      // Buscamos en la sesión inmediata anterior del tipo opuesto
+      const { data: currentSess } = await supabase.from('sessions').select('*').eq('id', sessionId).single();
+      if (currentSess) {
+        const prevType = currentSess.type === 'friday' ? 'monday' : 'friday';
+        const { data: prevSess } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('type', prevType)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (prevSess) {
+          const { data: historical } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('session_id', prevSess.id);
+          setHistoricalProjects(historical || []);
+        }
       }
     }
     setLoading(false);
@@ -582,7 +592,11 @@ export default function KitchenPage() {
                     </SortableContext>
                   </DndContext>
                 ) : (
-                  <MasterKitchenView projects={projects} chefAvatars={chefAvatars} />
+                  <MasterKitchenView 
+                    projects={projects} 
+                    chefAvatars={chefAvatars} 
+                    currentChefName={session.name}
+                  />
                 )}
               </>
             )}

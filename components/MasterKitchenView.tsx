@@ -10,9 +10,10 @@ import { Project } from '@/lib/types';
 interface MasterKitchenViewProps {
   projects: Project[];
   chefAvatars: Record<string, { avatar: string; isReady: boolean }>;
+  currentChefName?: string;
 }
 
-const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects, chefAvatars }) => {
+const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects, chefAvatars, currentChefName }) => {
   // Agrupar proyectos por chef_id
   const chefs = Array.from(new Set(projects.map((p) => p.chef_id)));
 
@@ -84,7 +85,7 @@ const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects, chefAva
                           <DishCard 
                             key={project.id} 
                             project={project} 
-                            canEdit={false} // El Host NO puede editar
+                            canEdit={project.chef_id === currentChefName} // El Host SOLO puede editar SUS platos
                           />
                         ))}
                     </div>
@@ -106,3 +107,4 @@ const MasterKitchenView: React.FC<MasterKitchenViewProps> = ({ projects, chefAva
 };
 
 export default MasterKitchenView;
+;
