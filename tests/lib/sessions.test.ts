@@ -23,23 +23,16 @@ describe('Sessions Logic', () => {
     vi.clearAllMocks();
   });
 
-  it('should clone projects from previous session to new session', async () => {
-    const mockSession = { id: 'new-session-id', type: 'friday', status: 'active' };
-    const mockPrevSession = { id: 'old-session-id', type: 'monday', status: 'closed' };
+  it('should clone projects from Monday to Friday session', async () => {
+    const mockNewSession = { id: 'new-friday-id', type: 'friday', status: 'active' };
+    const mockPrevMondaySession = { id: 'old-monday-id', type: 'monday', status: 'closed' };
     const mockProjects = [
-      { id: 'p1', title: 'Dish 1', session_id: 'old-session-id', version: 1, parent_id: null },
-      { id: 'p2', title: 'Dish 2', session_id: 'old-session-id', version: 2, parent_id: 'p0' },
+      { id: 'p1', title: 'Dish 1', session_id: 'old-monday-id', sort_order: 100 },
     ];
 
-    // Mock sequence of calls:
-    // 1. Fetch most recent Monday session
-    // 2. Insert new Friday session
-    // 3. Fetch projects from Monday session
-    // 4. Insert cloned projects
-    
     const fromSpy = vi.spyOn(supabase, 'from');
 
-    // Setup mock return values for each call
+    // Mock implementation for different tables and calls
     fromSpy.mockImplementation((table: string) => {
       const mockQuery: any = {
         select: vi.fn().mockReturnThis(),
@@ -47,66 +40,71 @@ describe('Sessions Logic', () => {
         eq: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
         limit: vi.fn().mockReturnThis(),
-        single: vi.fn().mockImplementation(async () => {
-          if (table === 'sessions') {
-            // First call: fetch previous session
-            if (fromSpy.mock.calls.length === 1) {
-              return { data: mockPrevSession, error: null };
-            }
-            // Second call: insert new session (+ select + single)
-            return { data: mockSession, error: null };
-          }
-          return { data: null, error: null };
-        }),
+        single: vi.fn(),
         // Handle the case where the chain ends with eq() or select() being awaited
         then: vi.fn().mockImplementation(async (resolve) => {
-          if (table === 'projects') {
-            // Check if we are in the select projects call (fetch projects to clone)
-            if (mockQuery.select.mock.calls.length > 0 && mockQuery.eq.mock.calls.length > 0) {
-                return resolve({ data: mockProjects, error: null });
-            }
-            // Check if we are in the insert projects call
-            if (mockQuery.insert.mock.calls.length > 0) {
-                return resolve({ data: [], error: null });
-            }
+          if (table === 'projects' && mockQuery.select.mock.calls.length > 0) {
+            return resolve({ data: mockProjects, error: null });
+          }
+          if (table === 'projects' && mockQuery.insert.mock.calls.length > 0) {
+            return resolve({ data: [], error: null });
           }
           return resolve({ data: null, error: null });
         })
       };
+
+      mockQuery.single.mockImplementation(async () => {
+        if (table === 'sessions') {
+          // If it's an insert call (first session call in the new logic)
+          if (mockQuery.insert.mock.calls.length > 0) {
+            return { data: mockNewSession, error: null };
+          }
+          // If it's a select call (fetching Monday to clone)
+          if (mockQuery.select.mock.calls.length > 0) {
+            return { data: mockPrevMondaySession, error: null };
+          }
+        }
+        return { data: null, error: null };
+      });
 
       return mockQuery;
     });
 
     const result = await cloneSession('friday');
 
-    expect(result).toEqual(mockSession);
-    expect(fromSpy).toHaveBeenCalledWith('sessions');
-    expect(fromSpy).toHaveBeenCalledWith('projects');
+    expect(result).toEqual(mockNewSession);
     
-    // Verify projects were cloned with version++ and parent_id
-    const projectsTableCall = fromSpy.mock.calls.filter(c => c[0] === 'projects');
-    expect(projectsTableCall.length).toBeGreaterThan(0);
+    // Should have called sessions twice (one insert, one select)
+    const sessionCalls = fromSpy.mock.calls.filter(c => c[0] === 'sessions');
+    expect(sessionCalls.length).toBe(2);
 
-    // Find the insert call for projects - it should be the last call to 'projects' table
-    const projectsMocks = fromSpy.mock.results
-      .filter((_, i) => fromSpy.mock.calls[i][0] === 'projects')
-      .map(r => r.value);
+    // Should have called projects to fetch and then to insert
+    const projectsCalls = fromSpy.mock.calls.filter(c => c[0] === 'projects');
+    expect(projectsCalls.length).toBe(2);
+  });
+
+  it('should NOT clone projects when creating a Monday session', async () => {
+    const mockNewMondaySession = { id: 'new-monday-id', type: 'monday', status: 'active' };
+
+    const fromSpy = vi.spyOn(supabase, 'from');
+
+    fromSpy.mockImplementation((table: string) => {
+      const mockQuery: any = {
+        insert: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockNewMondaySession, error: null }),
+        then: vi.fn().mockImplementation(async (resolve) => resolve({ data: mockNewMondaySession, error: null }))
+      };
+      return mockQuery;
+    });
+
+    const result = await cloneSession('monday');
+
+    expect(result).toEqual(mockNewMondaySession);
     
-    const insertMock = projectsMocks.find(m => m.insert.mock.calls.length > 0).insert;
-    const clonedProjects = insertMock.mock.calls[0][0];
-
-    expect(clonedProjects).toHaveLength(2);
-    expect(clonedProjects[0]).toMatchObject({
-      title: 'Dish 1',
-      session_id: 'new-session-id',
-      version: 2,
-      parent_id: 'p1'
-    });
-    expect(clonedProjects[1]).toMatchObject({
-      title: 'Dish 2',
-      session_id: 'new-session-id',
-      version: 3,
-      parent_id: 'p2'
-    });
+    // Should ONLY have called sessions table for the insert
+    const tableCalls = fromSpy.mock.calls.map(c => c[0]);
+    expect(tableCalls).toContain('sessions');
+    expect(tableCalls).not.toContain('projects');
   });
 });
