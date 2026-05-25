@@ -3,17 +3,9 @@ import { cloneSession } from '@/lib/sessions';
 import { supabase } from '@/lib/supabase';
 
 vi.mock('@/lib/supabase', () => {
-  const mockQuery: any = {
-    select: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    order: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    single: vi.fn().mockReturnThis(),
-  };
   return {
     supabase: {
-      from: vi.fn(() => mockQuery),
+      from: vi.fn(),
     },
   };
 });
@@ -22,6 +14,20 @@ describe('Sessions Logic', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+
+  const createMockQuery = (resolvedValue: any) => {
+    const mock: any = {
+      select: vi.fn().mockReturnThis(),
+      insert: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      neq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue(resolvedValue),
+      then: vi.fn().mockImplementation((resolve) => resolve(resolvedValue)),
+    };
+    return mock;
+  };
 
   it('should clone projects from Monday to Friday session', async () => {
     const mockNewSession = { id: 'new-friday-id', type: 'friday', status: 'active' };
@@ -32,79 +38,82 @@ describe('Sessions Logic', () => {
 
     const fromSpy = vi.spyOn(supabase, 'from');
 
-    // Mock implementation for different tables and calls
-    fromSpy.mockImplementation((table: string) => {
-      const mockQuery: any = {
-        select: vi.fn().mockReturnThis(),
-        insert: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        single: vi.fn(),
-        // Handle the case where the chain ends with eq() or select() being awaited
-        then: vi.fn().mockImplementation(async (resolve) => {
-          if (table === 'projects' && mockQuery.select.mock.calls.length > 0) {
-            return resolve({ data: mockProjects, error: null });
-          }
-          if (table === 'projects' && mockQuery.insert.mock.calls.length > 0) {
-            return resolve({ data: [], error: null });
-          }
-          return resolve({ data: null, error: null });
-        })
-      };
+    // 1st call: sessions (insert)
+    const sessionInsertMock = createMockQuery({ data: mockNewSession, error: null });
+    // 2nd call: sessions (select)
+    const sessionSelectMock = createMockQuery({ data: mockPrevMondaySession, error: null });
+    // 3rd call: projects (select)
+    const projectsSelectMock = createMockQuery({ data: mockProjects, error: null });
+    // 4th call: projects (insert)
+    const projectsInsertMock = createMockQuery({ data: [], error: null });
 
-      mockQuery.single.mockImplementation(async () => {
-        if (table === 'sessions') {
-          // If it's an insert call (first session call in the new logic)
-          if (mockQuery.insert.mock.calls.length > 0) {
-            return { data: mockNewSession, error: null };
-          }
-          // If it's a select call (fetching Monday to clone)
-          if (mockQuery.select.mock.calls.length > 0) {
-            return { data: mockPrevMondaySession, error: null };
-          }
-        }
-        return { data: null, error: null };
-      });
-
-      return mockQuery;
-    });
+    fromSpy
+      .mockReturnValueOnce(sessionInsertMock)
+      .mockReturnValueOnce(sessionSelectMock)
+      .mockReturnValueOnce(projectsSelectMock)
+      .mockReturnValueOnce(projectsInsertMock);
 
     const result = await cloneSession('friday');
 
     expect(result).toEqual(mockNewSession);
-    
-    // Should have called sessions twice (one insert, one select)
-    const sessionCalls = fromSpy.mock.calls.filter(c => c[0] === 'sessions');
-    expect(sessionCalls.length).toBe(2);
-
-    // Should have called projects to fetch and then to insert
-    const projectsCalls = fromSpy.mock.calls.filter(c => c[0] === 'projects');
-    expect(projectsCalls.length).toBe(2);
+    expect(fromSpy).toHaveBeenCalledTimes(4);
   });
 
-  it('should NOT clone projects when creating a Monday session', async () => {
+  it('should NOT clone projects when creating a Monday session if there is no previous session', async () => {
     const mockNewMondaySession = { id: 'new-monday-id', type: 'monday', status: 'active' };
 
     const fromSpy = vi.spyOn(supabase, 'from');
 
-    fromSpy.mockImplementation((table: string) => {
-      const mockQuery: any = {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: mockNewMondaySession, error: null }),
-        then: vi.fn().mockImplementation(async (resolve) => resolve({ data: mockNewMondaySession, error: null }))
-      };
-      return mockQuery;
-    });
+    // 1st call: sessions (insert)
+    const sessionInsertMock = createMockQuery({ data: mockNewMondaySession, error: null });
+    // 2nd call: sessions (select) - returns nothing
+    const sessionSelectMock = createMockQuery({ data: null, error: { message: 'Not found' } });
+
+    fromSpy
+      .mockReturnValueOnce(sessionInsertMock)
+      .mockReturnValueOnce(sessionSelectMock);
+
+    const result = await cloneSession('monday');
+
+    expect(result).toEqual(mockNewMondaySession);
+    expect(fromSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('should clone projects from Friday to Monday session excluding served ones', async () => {
+    const mockNewMondaySession = { id: 'new-monday-id', type: 'monday', status: 'active' };
+    const mockPrevFridaySession = { id: 'old-friday-id', type: 'friday', status: 'closed' };
+    const mockProjects = [
+      { id: 'p1', title: 'Pending Dish', status: 'prep', session_id: 'old-friday-id', sort_order: 100 },
+      { id: 'p2', title: 'Served Dish', status: 'served', session_id: 'old-friday-id', sort_order: 200 },
+    ];
+
+    const fromSpy = vi.spyOn(supabase, 'from');
+
+    // 1st call: sessions (insert)
+    const sessionInsertMock = createMockQuery({ data: mockNewMondaySession, error: null });
+    // 2nd call: sessions (select)
+    const sessionSelectMock = createMockQuery({ data: mockPrevFridaySession, error: null });
+    // 3rd call: projects (select) - Mock only the non-served project as the database would filter it
+    const projectsSelectMock = createMockQuery({ data: [mockProjects[0]], error: null });
+    // 4th call: projects (insert)
+    const projectsInsertMock = createMockQuery({ data: [], error: null });
+
+    fromSpy
+      .mockReturnValueOnce(sessionInsertMock)
+      .mockReturnValueOnce(sessionSelectMock)
+      .mockReturnValueOnce(projectsSelectMock)
+      .mockReturnValueOnce(projectsInsertMock);
 
     const result = await cloneSession('monday');
 
     expect(result).toEqual(mockNewMondaySession);
     
-    // Should ONLY have called sessions table for the insert
-    const tableCalls = fromSpy.mock.calls.map(c => c[0]);
-    expect(tableCalls).toContain('sessions');
-    expect(tableCalls).not.toContain('projects');
+    // Verify that the projects select call included the neq('status', 'served') filter
+    expect(projectsSelectMock.neq).toHaveBeenCalledWith('status', 'served');
+
+    // Verify that only the non-served project was inserted
+    const insertedProjects = projectsInsertMock.insert.mock.calls[0][0];
+    expect(insertedProjects).toHaveLength(1);
+    expect(insertedProjects[0].title).toBe('Pending Dish');
   });
 });

@@ -17,41 +17,48 @@ export async function cloneSession(type: 'monday' | 'friday'): Promise<KitchenSe
     return null;
   }
 
-  // 2. Only clone projects if it's a Friday session (from most recent Monday)
-  if (type === 'friday') {
-    // Fetch the most recent Monday session
-    const { data: sourceSession, error: sessionError } = await supabase
-      .from('sessions')
+  // 2. Clone projects from most recent session of the opposite type
+  const sourceSessionType = type === 'monday' ? 'friday' : 'monday';
+  
+  // Fetch the most recent source session
+  const { data: sourceSession, error: sessionError } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('type', sourceSessionType)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!sessionError && sourceSession) {
+    let query = supabase
+      .from('projects')
       .select('*')
-      .eq('type', 'monday')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .eq('session_id', sourceSession.id);
 
-    if (!sessionError && sourceSession) {
-      const { data: projects, error: projectsError } = await supabase
+    // If it's a Monday session, exclude 'served' projects
+    if (type === 'monday') {
+      query = query.neq('status', 'served');
+    }
+
+    const { data: projects, error: projectsError } = await query;
+
+    if (!projectsError && projects && projects.length > 0) {
+      const clonedProjects = projects.map((project: Project) => ({
+        title: project.title,
+        status: project.status,
+        temp: project.temp,
+        chef_id: project.chef_id,
+        icon: project.icon,
+        sort_order: project.sort_order,
+        session_id: newSession.id
+      }));
+
+      const { error: insertError } = await supabase
         .from('projects')
-        .select('*')
-        .eq('session_id', sourceSession.id);
+        .insert(clonedProjects);
 
-      if (!projectsError && projects && projects.length > 0) {
-        const clonedProjects = projects.map((project: Project) => ({
-          title: project.title,
-          status: project.status,
-          temp: project.temp,
-          chef_id: project.chef_id,
-          icon: project.icon,
-          sort_order: project.sort_order,
-          session_id: newSession.id
-        }));
-
-        const { error: insertError } = await supabase
-          .from('projects')
-          .insert(clonedProjects);
-
-        if (insertError) {
-          console.error('Error inserting cloned projects:', insertError);
-        }
+      if (insertError) {
+        console.error('Error inserting cloned projects:', insertError);
       }
     }
   }
