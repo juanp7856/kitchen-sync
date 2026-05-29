@@ -47,9 +47,11 @@ Los colores definen el estado crítico del "Plato" (Proyecto):
 - **Configuración:** Integrado en un entorno Next.js 16 para asegurar regresiones en la lógica de clonado y timers.
 
 ## 8. Ciclo de Vida: Lunes a Viernes
-- **Monday Cloning:** Al iniciar la sesión del lunes, se clonan los platos de la sesión anterior.
+- **Universal Cloning:** Al iniciar cualquier sesión (Lunes o Viernes), se clonan los platos de la sesión anterior.
+  - **Restricción:** Solo se clonan platos que **NO** estén en estado `served`.
   - Se mantiene la trazabilidad mediante `parent_id`.
   - Se incrementa el campo `version`.
+- **Friday Snapshots:** Al abrir la sesión de viernes, se genera una copia de los platos pendientes del lunes para evaluar el progreso semanal.
 - **Friday Closure:** Las sesiones se marcan como `closed`, congelando el estado para la posteridad.
 
 ## 9. Dinámica de Evaluación (Timer Dual)

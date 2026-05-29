@@ -29,11 +29,12 @@ describe('Sessions Logic', () => {
     return mock;
   };
 
-  it('should clone projects from Monday to Friday session', async () => {
+  it('should clone projects from Monday to Friday session excluding served ones', async () => {
     const mockNewSession = { id: 'new-friday-id', type: 'friday', status: 'active' };
     const mockPrevMondaySession = { id: 'old-monday-id', type: 'monday', status: 'closed' };
     const mockProjects = [
-      { id: 'p1', title: 'Dish 1', session_id: 'old-monday-id', sort_order: 100 },
+      { id: 'p1', title: 'Pending Dish', status: 'prep', session_id: 'old-monday-id', sort_order: 100 },
+      { id: 'p2', title: 'Served Dish', status: 'served', session_id: 'old-monday-id', sort_order: 200 },
     ];
 
     const fromSpy = vi.spyOn(supabase, 'from');
@@ -43,7 +44,7 @@ describe('Sessions Logic', () => {
     // 2nd call: sessions (select)
     const sessionSelectMock = createMockQuery({ data: mockPrevMondaySession, error: null });
     // 3rd call: projects (select)
-    const projectsSelectMock = createMockQuery({ data: mockProjects, error: null });
+    const projectsSelectMock = createMockQuery({ data: [mockProjects[0]], error: null });
     // 4th call: projects (insert)
     const projectsInsertMock = createMockQuery({ data: [], error: null });
 
@@ -57,6 +58,7 @@ describe('Sessions Logic', () => {
 
     expect(result).toEqual(mockNewSession);
     expect(fromSpy).toHaveBeenCalledTimes(4);
+    expect(projectsSelectMock.neq).toHaveBeenCalledWith('status', 'served');
   });
 
   it('should NOT clone projects when creating a Monday session if there is no previous session', async () => {

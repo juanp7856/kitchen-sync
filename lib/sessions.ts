@@ -35,10 +35,8 @@ export async function cloneSession(type: 'monday' | 'friday'): Promise<KitchenSe
       .select('*')
       .eq('session_id', sourceSession.id);
 
-    // If it's a Monday session, exclude 'served' projects
-    if (type === 'monday') {
-      query = query.neq('status', 'served');
-    }
+    // Exclude 'served' projects
+    query = query.neq('status', 'served');
 
     const { data: projects, error: projectsError } = await query;
 
