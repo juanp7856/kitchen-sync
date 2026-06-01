@@ -25,6 +25,7 @@ interface EvaluationRoundsProps {
 const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historicalProjects, currentUser, isHost }) => {
   const [round, setRound] = useState<RoundState | null>(null);
   const [channel, setChannel] = useState<any>(null);
+  const [isTimesUp, setIsTimesUp] = useState(false);
 
   useEffect(() => {
     const newChannel = supabase.channel('room-state');
@@ -56,17 +57,22 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historica
           if (nextTime <= 0) {
             if (prev.phase === 'social') {
               // Transition to evaluation
-              const newState: RoundState = { ...prev, phase: 'evaluation', timeLeft: 120 };
+              const newState: RoundState = { ...prev, phase: 'evaluation', timeLeft: 90 };
               if (isHost) {
                 playBell();
                 broadcastUpdate(newState);
               }
               return newState;
             } else {
-              // End of evaluation
+              // End of evaluation - Force strict stop
+              setIsTimesUp(true);
               if (isHost) {
                 playBell();
                 broadcastUpdate({ ...prev, timeLeft: 0 });
+                // Auto-advance after 5 seconds
+                setTimeout(() => {
+                  nextChef();
+                }, 5000);
               }
               return { ...prev, timeLeft: 0 };
             }
@@ -84,6 +90,15 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historica
     }
     return () => clearInterval(interval);
   }, [round?.isActive, round?.currentChefIndex, round?.phase, isHost, channel]);
+
+  // Sync isTimesUp based on round data
+  useEffect(() => {
+    if (round?.isActive && round.timeLeft <= 0 && round.phase === 'evaluation') {
+      setIsTimesUp(true);
+    } else {
+      setIsTimesUp(false);
+    }
+  }, [round?.timeLeft, round?.phase, round?.isActive]);
 
   const playBell = () => {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
@@ -170,6 +185,28 @@ const EvaluationRounds: React.FC<EvaluationRoundsProps> = ({ projects, historica
 
   return (
     <div className="fixed inset-0 z-[200] bg-kitchen-steel flex flex-col animate-in fade-in duration-500 overflow-y-auto">
+      {/* Strict Timeout Overlay */}
+      {isTimesUp && (
+        <div className="fixed inset-0 z-[300] bg-kitchen-hot flex flex-col items-center justify-center animate-in zoom-in duration-300">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white via-transparent to-transparent animate-pulse"></div>
+          </div>
+          <h2 className="text-8xl md:text-[12rem] font-black italic text-white leading-none uppercase tracking-tighter animate-bounce text-center px-4 drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)]">
+            ¡TIEMPO!
+          </h2>
+          <div className="mt-8 flex flex-col items-center gap-4">
+            <div className="flex gap-2">
+              <span className="w-3 h-3 bg-white rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+              <span className="w-3 h-3 bg-white rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+              <span className="w-3 h-3 bg-white rounded-full animate-bounce"></span>
+            </div>
+            <p className="text-xl md:text-2xl font-mono text-white/90 uppercase tracking-[0.4em] font-bold text-center px-6">
+              Preparando la siguiente estación
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col p-8">
         <header className="sticky top-0 z-50 bg-kitchen-steel/80 backdrop-blur-md flex justify-between items-center mb-12 border-b border-white/10 pb-8 -mx-8 px-8">
           <div className="flex items-center gap-6">
