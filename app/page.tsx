@@ -37,6 +37,7 @@ interface UserSession {
   role: 'chef' | 'host';
   avatar: string;
   email: string;
+  profileId: string;
 }
 
 export default function KitchenPage() {
@@ -55,7 +56,7 @@ export default function KitchenPage() {
   const fetchProjects = async (sessionId: string) => {
     const { data, error } = await supabase
       .from('projects')
-      .select('*')
+      .select('*, profiles(name, avatar)')
       .eq('session_id', sessionId)
       .order('sort_order', { ascending: true });
 
@@ -78,7 +79,7 @@ export default function KitchenPage() {
         if (prevSess) {
           const { data: historical } = await supabase
             .from('projects')
-            .select('*')
+            .select('*, profiles(name, avatar)')
             .eq('session_id', prevSess.id);
           setHistoricalProjects(historical || []);
         }
@@ -539,7 +540,7 @@ export default function KitchenPage() {
 
             <div className="flex flex-col md:flex-row gap-4 mb-8 items-stretch">
               <div className="flex-1 w-full">
-                <AddDishForm chefId={session.name} sessionId={currentSession.id} />
+                <AddDishForm chefId={session.name} profileId={session.profileId} sessionId={currentSession.id} />
               </div>
               {!isHost && (
                 <button
@@ -573,17 +574,17 @@ export default function KitchenPage() {
                     onDragEnd={handleDragEnd}
                   >
                     <SortableContext
-                      items={projects.filter(p => p.chef_id === session.name).map(p => p.id)}
+                      items={projects.filter(p => p.profile_id === session.profileId || p.chef_id === session.name).map(p => p.id)}
                       strategy={verticalListSortingStrategy}
                     >
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {projects.filter(p => p.chef_id === session.name).length === 0 ? (
+                        {projects.filter(p => p.profile_id === session.profileId || p.chef_id === session.name).length === 0 ? (
                           <div className="col-span-full text-center py-20 border-2 border-dashed border-white/10 rounded-3xl">
                             <p className="text-white/40 font-mono">Tu estación está vacía. Empieza a preparar un plato.</p>
                           </div>
                         ) : (
                           projects
-                            .filter(p => p.chef_id === session.name)
+                            .filter(p => p.profile_id === session.profileId || p.chef_id === session.name)
                             .map((project) => (
                               <SortableDish key={project.id} project={project} />
                             ))

@@ -4,6 +4,11 @@ export interface Project {
   status: 'prep' | 'slow' | 'served' | 'cooking';
   temp: number;
   chef_id: string;
+  profile_id?: string | null;
+  profiles?: {
+    name: string;
+    avatar: string;
+  } | null;
   icon?: string;
   sort_order: number;
   session_id?: string;
