@@ -20,3 +20,8 @@ export interface KitchenSession {
   status: 'active' | 'closed';
   created_at: string;
 }
+
+export interface AppSettings {
+  id: 1;
+  current_host_email: string;
+}

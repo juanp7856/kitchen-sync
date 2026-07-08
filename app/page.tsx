@@ -8,6 +8,7 @@ import KitchenTimer from '@/components/KitchenTimer';
 import MasterKitchenView from '@/components/MasterKitchenView';
 import AuthScreen from '@/components/auth/AuthScreen';
 import EvaluationRounds from '@/components/EvaluationRounds';
+import HostTransferModal from '@/components/host/HostTransferModal';
 import {
   DndContext,
   closestCenter,
@@ -29,12 +30,12 @@ import { CSS } from '@dnd-kit/utilities';
 import AvatarDisplay from '@/components/AvatarDisplay';
 import { Project, KitchenSession } from '@/lib/types';
 import { cloneSession } from '@/lib/sessions';
+import { useHostManager } from '@/hooks/useHostManager';
 
 export const dynamic = 'force-dynamic';
 
 interface UserSession {
   name: string;
-  role: 'chef' | 'host';
   avatar: string;
   email: string;
   profileId: string;
@@ -51,6 +52,10 @@ export default function KitchenPage() {
   const [currentSession, setCurrentSession] = useState<KitchenSession | null>(null);
 
   const [historicalProjects, setHistoricalProjects] = useState<Project[]>([]);
+  const [showHostTransferModal, setShowHostTransferModal] = useState(false);
+
+  // Host management via database singleton
+  const { isHost, transferHost } = useHostManager();
 
   // Carga de proyectos por sesión
   const fetchProjects = async (sessionId: string) => {
@@ -270,7 +275,7 @@ export default function KitchenPage() {
     const signalChannel = supabase.channel('chef-signals');
     signalChannel
       .on('broadcast', { event: 'chef-ready' }, () => {
-        if (session.role === 'host') {
+        if (isHost(session.email)) {
           const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2870/2870-preview.mp3');
           audio.play().catch(e => console.log('Audio error:', e));
         }
@@ -280,7 +285,7 @@ export default function KitchenPage() {
     return () => {
       supabase.removeChannel(signalChannel);
     };
-  }, [session]);
+  }, [session, isHost]);
 
   const handleEntry = (userData: UserSession) => {
     setSession(userData);
@@ -386,7 +391,7 @@ export default function KitchenPage() {
     return <AuthScreen onEntry={handleEntry} />;
   }
 
-  const isHost = session.role === 'host';
+  const isHostUser = isHost(session.email);
 
   const SortableDish = ({ project }: { project: Project }) => {
     const {
@@ -428,13 +433,13 @@ export default function KitchenPage() {
               Kitchen<span className="text-kitchen-cool underline">Sync</span>
             </h1>
             <p className="text-white/60 font-mono text-[10px] md:text-sm mt-1">
-              CHEF: <span className="text-white font-bold">{session.name.toUpperCase()}</span> | ROL: <span className={isHost ? 'text-kitchen-hot font-bold' : 'text-kitchen-cool font-bold'}>{session.role.toUpperCase()}</span>
+              CHEF: <span className="text-white font-bold">{session.name.toUpperCase()}</span> | ROL: <span className={isHostUser ? 'text-kitchen-hot font-bold' : 'text-kitchen-cool font-bold'}>{isHostUser ? 'MAÎTRE' : 'CHEF'}</span>
             </p>
           </div>
         </div>
 
         <div className="w-full md:w-auto order-3 md:order-2">
-          <KitchenTimer isHost={isHost} />
+          <KitchenTimer isHost={isHostUser} />
         </div>
         
         <div className="flex items-center justify-between md:justify-end gap-4 md:order-3">
@@ -450,7 +455,7 @@ export default function KitchenPage() {
           </div>
           
           <div className="flex gap-2">
-            {isHost && (
+            {isHostUser && (
               <>
                 <button 
                   onClick={handleCloseSession}
@@ -468,6 +473,14 @@ export default function KitchenPage() {
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
+
+                <button 
+                  onClick={() => setShowHostTransferModal(true)}
+                  className="p-3 bg-kitchen-cool/10 hover:bg-kitchen-cool text-kitchen-cool hover:text-white rounded-xl border border-kitchen-cool/20 transition-all shadow-sm"
+                  title="Transferir rol de Maître"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                </button>
               </>
             )}
 
@@ -484,9 +497,9 @@ export default function KitchenPage() {
 
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-6">
-          <div className="flex bg-black/20 px-4 py-2 rounded-xl border border-white/5">
-             <span className="text-[10px] md:text-xs font-mono text-white/60 tracking-widest uppercase text-center w-full">
-               {isHost ? 'Panel del Maître' : 'Tu Estación de Trabajo'}
+           <div className="flex bg-black/20 px-4 py-2 rounded-xl border border-white/5">
+              <span className="text-[10px] md:text-xs font-mono text-white/60 tracking-widest uppercase text-center w-full">
+               {isHostUser ? 'Panel del Maître' : 'Tu Estación de Trabajo'}
              </span>
           </div>
           
@@ -499,7 +512,7 @@ export default function KitchenPage() {
           <div className="flex flex-col items-center justify-center py-20 bg-black/20 rounded-[3rem] border-2 border-dashed border-white/10 animate-in fade-in zoom-in duration-700">
             <div className="text-8xl mb-8">🏪</div>
             <h2 className="text-4xl font-black italic uppercase text-white/40 tracking-tighter mb-4 text-center px-6">La cocina está cerrada</h2>
-            {isHost ? (
+            {isHostUser ? (
               <div className="flex flex-col sm:flex-row gap-6 mt-8">
                 <button 
                   onClick={() => handleCreateSession('monday')}
@@ -518,7 +531,7 @@ export default function KitchenPage() {
               <p className="text-white/20 font-mono uppercase tracking-[0.3em] text-xs">Esperando a que el Maître abra la sesión...</p>
             )}
           </div>
-        ) : isReady && !isHost ? (
+        ) : isReady && !isHostUser ? (
           <div className="flex flex-col items-center justify-center py-16 md:py-32 space-y-6 bg-black/20 rounded-[2rem] md:rounded-[3rem] border border-white/10 mt-8 animate-in zoom-in duration-500 shadow-2xl px-6 text-center">
             <div className="text-7xl md:text-9xl animate-bounce drop-shadow-2xl">🛎️</div>
             <h2 className="text-3xl md:text-4xl font-black italic uppercase text-kitchen-done tracking-tighter">¡Estación Lista!</h2>
@@ -542,7 +555,7 @@ export default function KitchenPage() {
               <div className="flex-1 w-full">
                 <AddDishForm chefId={session.name} profileId={session.profileId} sessionId={currentSession.id} />
               </div>
-              {!isHost && (
+              {!isHostUser && (
                 <button
                   onClick={() => {
                     setIsReady(true);
@@ -567,7 +580,7 @@ export default function KitchenPage() {
               </div>
             ) : (
               <>
-                {!isHost ? (
+                {!isHostUser ? (
                   <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
@@ -605,12 +618,21 @@ export default function KitchenPage() {
         )}
 
         <EvaluationRounds 
-          isHost={isHost} 
+          isHost={isHostUser} 
           projects={projects} 
           historicalProjects={historicalProjects}
           currentUser={{ name: session.name, avatar: session.avatar, email: session.email }} 
         />
       </div>
+
+      <HostTransferModal
+        isOpen={showHostTransferModal}
+        onClose={() => setShowHostTransferModal(false)}
+        isHost={isHostUser}
+        transferHost={transferHost}
+        chefAvatars={chefAvatars}
+        currentUserEmail={session.email}
+      />
     </main>
   );
 }

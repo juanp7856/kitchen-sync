@@ -22,13 +22,13 @@ describe('EvaluationRounds', () => {
   const mockHost = { name: 'Host User', avatar: '👑', email: 'jduarte@intercorp.com.pe' };
 
   it('should render "INICIAR RONDAS" button if user is host and no round is active', () => {
-    render(<EvaluationRounds projects={mockProjects as any} currentUser={mockHost} isHost={true} />);
+    render(<EvaluationRounds projects={mockProjects as any} historicalProjects={[]} currentUser={mockHost} isHost={true} />);
     
     expect(screen.getByText(/INICIAR RONDAS/i)).toBeInTheDocument();
   });
 
   it('should NOT render "INICIAR RONDAS" button if user is NOT host', () => {
-    render(<EvaluationRounds projects={mockProjects as any} currentUser={mockUser} isHost={false} />);
+    render(<EvaluationRounds projects={mockProjects as any} historicalProjects={[]} currentUser={mockUser} isHost={false} />);
     
     expect(screen.queryByText(/INICIAR RONDAS/i)).not.toBeInTheDocument();
   });
