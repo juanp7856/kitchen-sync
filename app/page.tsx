@@ -633,12 +633,14 @@ export default function KitchenPage() {
           currentUser={{ name: session.name, avatar: session.avatar, email: session.email }} 
         />
 
-        <TopicHeatmap
-          sessionId={currentSession!.id}
-          weekStart={weekStart}
-          isHost={isHostUser}
-          projects={projects}
-        />
+        {currentSession && (
+          <TopicHeatmap
+            sessionId={currentSession.id}
+            weekStart={weekStart}
+            isHost={isHostUser}
+            projects={projects}
+          />
+        )}
       </div>
 
       <HostTransferModal
