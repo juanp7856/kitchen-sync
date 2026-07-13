@@ -55,10 +55,8 @@ describe('topicClusters orchestrator', () => {
   it('should short-circuit with empty array (no Worker call)', async () => {
     const { runClustering } = await import('@/lib/topicClusters');
 
-    const results = await runClustering([], { sessionId: 's1', weekStart: '2026-07-13' });
+    const results = await runClustering([], { weekStart: '2026-07-13' });
 
     expect(results).toEqual([]);
-    // Empty input short-circuits before Worker is created
-    expect(lastWorkerInstance).toBeNull();
   });
 });

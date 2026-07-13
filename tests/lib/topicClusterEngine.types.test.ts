@@ -14,45 +14,26 @@ describe('Topic cluster types', () => {
     it('should have required fields', () => {
       const cluster: TopicCluster = {
         id: 'cluster-1',
-        session_id: 'session-1',
         week_start: '2026-07-13',
         theme_label: 'Auth fixes',
         confidence: 0.85,
         project_count: 3,
-        is_global: false,
         created_at: '2026-07-13T10:00:00Z',
       };
       expect(cluster.id).toBe('cluster-1');
-      expect(cluster.session_id).toBe('session-1');
+      expect(cluster.week_start).toBe('2026-07-13');
       expect(cluster.theme_label).toBe('Auth fixes');
       expect(cluster.confidence).toBe(0.85);
       expect(cluster.project_count).toBe(3);
-      expect(cluster.is_global).toBe(false);
-    });
-
-    it('should allow global clusters with null session', () => {
-      const cluster: TopicCluster = {
-        id: 'cluster-2',
-        session_id: null,
-        week_start: '2026-07-13',
-        theme_label: 'Global analysis',
-        confidence: 0.9,
-        project_count: 10,
-        is_global: true,
-      };
-      expect(cluster.session_id).toBeNull();
-      expect(cluster.is_global).toBe(true);
     });
 
     it('should allow optional created_at', () => {
       const cluster: TopicCluster = {
         id: 'cluster-1',
-        session_id: 'session-1',
         week_start: '2026-07-13',
         theme_label: 'Singleton',
         confidence: 1.0,
         project_count: 1,
-        is_global: false,
       };
       expect(cluster.created_at).toBeUndefined();
     });

@@ -6,7 +6,6 @@ import { runClustering } from '@/lib/topicClusters';
 import type { ClusterResult, TopicClusterProject } from '@/lib/types';
 
 interface TopicHeatmapProps {
-  sessionId: string | null; // null = analyze all historical projects
   weekStart: string; // ISO date (Monday)
   isHost: boolean;
   projects: Array<{ id: string; title: string }>;
@@ -21,33 +20,23 @@ interface ClusterDisplay {
   exampleTitles: string[];
 }
 
-export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }: TopicHeatmapProps) {
+export default function TopicHeatmap({ weekStart, isHost, projects }: TopicHeatmapProps) {
   const [stage, setStage] = useState<Stage>('idle');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [clusters, setClusters] = useState<ClusterDisplay[]>([]);
 
-  const [allProjects, setAllProjects] = useState<Array<{ id: string; title: string }>>([]);
-
   // Load saved clusters on mount
   useEffect(() => {
     loadSavedClusters();
-  }, [sessionId, weekStart]);
+  }, [weekStart]);
 
   async function loadSavedClusters() {
     try {
-      let query = supabase
+      const { data: savedClusters, error: queryError } = await supabase
         .from('topic_clusters')
         .select('*, topic_cluster_projects(project_id)')
         .eq('week_start', weekStart);
-
-      if (sessionId) {
-        query = query.eq('session_id', sessionId);
-      } else {
-        query = query.eq('is_global', true);
-      }
-
-      const { data: savedClusters, error: queryError } = await query;
 
       if (queryError || !savedClusters || savedClusters.length === 0) {
         setStage('idle');
@@ -76,24 +65,15 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
     setProgress(0);
 
     try {
-      let titles: Array<{ id: string; title: string }>;
+      // Fetch ALL projects from database (always global analysis)
+      const { data: allProjectsData, error: queryError } = await supabase
+        .from('projects')
+        .select('id, title')
+        .not('title', 'is', null);
 
-      if (sessionId) {
-        // Session-specific: use current projects from props
-        titles = projects.map(p => ({ id: p.id, title: p.title }));
-      } else {
-        // Global historical: fetch ALL projects from database
-        setStage('loading');
-        const { data: allProjectsData, error: queryError } = await supabase
-          .from('projects')
-          .select('id, title')
-          .not('title', 'is', null);
-
-        if (queryError) throw new Error(`Failed to fetch historical projects: ${queryError.message}`);
-        
-        titles = (allProjectsData ?? []).map(p => ({ id: p.id, title: p.title }));
-        setAllProjects(titles);
-      }
+      if (queryError) throw new Error(`Failed to fetch projects: ${queryError.message}`);
+      
+      const titles = (allProjectsData ?? []).map(p => ({ id: p.id, title: p.title }));
 
       if (titles.length === 0) {
         setStage('empty');
@@ -101,7 +81,7 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
         return;
       }
 
-      const results = await runClustering(titles, { sessionId, weekStart }, (stage, progress) => {
+      const results = await runClustering(titles, { weekStart }, (stage, progress) => {
         if (stage === 'loading') setStage('loading');
         else if (stage === 'embedding') setStage('embedding');
         else if (stage === 'clustering') setStage('clustering');
@@ -121,12 +101,11 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
         clusterMap.get(r.cluster_label)!.push(r);
       }
 
-      const projectSource = sessionId ? projects : allProjects;
       const displays: ClusterDisplay[] = [];
       for (const [label, members] of clusterMap.entries()) {
         const project_ids = members.map(m => m.project_id);
         const exampleTitles = members.slice(0, 3).map(m => {
-          const p = projectSource.find(proj => proj.id === m.project_id);
+          const p = titles.find(proj => proj.id === m.project_id);
           return p?.title ?? m.project_id;
         });
         const avgConfidence = members.reduce((sum, m) => sum + m.confidence, 0) / members.length;
@@ -152,7 +131,7 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
       setError(errorMessage);
       setStage('error');
     }
-  }, [projects, sessionId, weekStart, allProjects]);
+  }, [weekStart]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 

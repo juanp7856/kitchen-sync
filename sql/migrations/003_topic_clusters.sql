@@ -2,18 +2,16 @@
 -- Created: 2026-07-13
 -- Feature: Weekly semantic clustering of project titles (topic-clusters change)
 
--- Topic clusters: one row per cluster per (session_id, week_start)
+-- Topic clusters: one row per cluster per week_start
 CREATE TABLE IF NOT EXISTS public.topic_clusters (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID REFERENCES public.sessions(id) ON DELETE CASCADE,  -- NULL = global historical analysis
-  week_start DATE NOT NULL,  -- Monday of the week (ISO) or analysis date
+  week_start DATE NOT NULL,  -- Analysis date (Monday of week)
   theme_label TEXT NOT NULL, -- Most frequent words from cluster titles
   confidence NUMERIC(3,2) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
   project_count INTEGER NOT NULL CHECK (project_count >= 1),
-  is_global BOOLEAN NOT NULL DEFAULT false,  -- true = aggregated across all sessions
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  UNIQUE (session_id, week_start, theme_label)
+  UNIQUE (week_start, theme_label)
 );
 
 -- Junction table: which projects belong to which cluster

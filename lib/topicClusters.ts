@@ -14,7 +14,6 @@ import type { ClusterResult, TopicCluster, TopicClusterProject } from './types';
 export { runClustering };
 
 interface RunClusteringOptions {
-  sessionId: string | null; // null = global historical analysis
   weekStart: string;
 }
 
@@ -28,7 +27,7 @@ async function runClustering(
   options: RunClusteringOptions,
   onProgress?: ProgressCallback
 ): Promise<ClusterResult[]> {
-  const { sessionId, weekStart } = options;
+  const { weekStart } = options;
 
   if (titles.length === 0) return [];
 
@@ -90,8 +89,8 @@ async function runClustering(
   const { labels } = dbscanCosine(titles, embeddings, 0.3, 2);
   const results = buildClusters(titles, embeddings, labels);
 
-  // ─── Stage 4: Persist ────────────────────────────────────────────────────
-  await persistResults(results, titles, sessionId, weekStart);
+  // ─── Stage 4: Persist (always — replaces previous analysis for this week) ─
+  await persistResults(results, titles, weekStart);
 
   return results;
 }
@@ -294,12 +293,10 @@ function computeConfidence(
 async function persistResults(
   results: ClusterResult[],
   titles: { id: string; title: string }[],
-  sessionId: string | null,
   weekStart: string
 ): Promise<void> {
   if (results.length === 0) return;
 
-  const isGlobal = sessionId === null;
   const clusterMap = new Map<string, ClusterResult[]>();
   for (const r of results) {
     if (!clusterMap.has(r.cluster_label)) {
@@ -308,31 +305,21 @@ async function persistResults(
     clusterMap.get(r.cluster_label)!.push(r);
   }
 
-  // DELETE existing clusters for this week (session-specific or global)
-  let deleteQuery = supabase
+  // DELETE existing clusters for this week
+  const { error: deleteError } = await supabase
     .from('topic_clusters')
     .delete()
     .eq('week_start', weekStart);
-  
-  if (isGlobal) {
-    deleteQuery = deleteQuery.eq('is_global', true);
-  } else {
-    deleteQuery = deleteQuery.eq('session_id', sessionId);
-  }
-
-  const { error: deleteError } = await deleteQuery;
 
   if (deleteError) throw new Error(`Failed to delete old clusters: ${deleteError.message}`);
 
   // INSERT new clusters
   const clusters = Array.from(clusterMap.entries()).map(([theme_label, members]) => ({
     id: crypto.randomUUID(),
-    session_id: sessionId,
     week_start: weekStart,
     theme_label,
     confidence: members.reduce((sum, m) => sum + m.confidence, 0) / members.length,
     project_count: members.length,
-    is_global: isGlobal,
   }));
 
   const { error: insertClusterError } = await supabase
@@ -341,7 +328,7 @@ async function persistResults(
 
   if (insertClusterError) throw new Error(`Failed to insert clusters: ${insertClusterError.message}`);
 
-  // Fetch project metadata for linking (graceful fallback)
+  // Fetch project metadata for linking
   const projectIds = titles.map(t => t.id).filter(Boolean);
   let projectMeta = new Map<string, { profile_id: string | null; chef_id: string | null }>();
 
