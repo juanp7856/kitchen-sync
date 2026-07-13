@@ -656,7 +656,6 @@ export default function KitchenPage() {
           <TopicHeatmap
             weekStart={weekStart}
             isHost={isHostUser}
-            projects={projects}
           />
         )}
       </div>
