@@ -2,7 +2,7 @@
  * topicClusters — Orchestrator for semantic clustering (main thread).
  *
  * Pipeline:
- *   1. Dynamic import @xenova/transformers (lazy loaded)
+   *   1. Dynamic import @huggingface/transformers (lazy loaded)
  *   2. Generate embeddings for project titles
  *   3. Run DBSCAN clustering
  *   4. Persist to Supabase (if session-specific)
@@ -35,12 +35,13 @@ async function runClustering(
   // ─── Stage 1: Load model (lazy dynamic import) ────────────────────────────
   onProgress?.('loading', 0);
 
-  const { pipeline } = await import('@xenova/transformers');
+  const { pipeline } = await import('@huggingface/transformers');
 
   const extractor = await pipeline(
     'feature-extraction',
     'Xenova/all-MiniLM-L6-v2',
     {
+      dtype: 'fp32',
       progress_callback: (progress: any) => {
         if (progress.status === 'progress' && progress.total) {
           const pct = Math.round((progress.loaded / progress.total) * 50);
