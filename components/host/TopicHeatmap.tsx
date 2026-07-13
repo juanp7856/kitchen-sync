@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { runClustering } from '@/lib/topicClusters';
-import type { ClusterResult } from '@/lib/types';
+import type { ClusterResult, TopicClusterProject } from '@/lib/types';
 
 interface TopicHeatmapProps {
   sessionId: string | null; // null = analyze all historical projects
@@ -28,6 +28,47 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
   const [clusters, setClusters] = useState<ClusterDisplay[]>([]);
 
   const [allProjects, setAllProjects] = useState<Array<{ id: string; title: string }>>([]);
+
+  // Load saved clusters on mount
+  useEffect(() => {
+    loadSavedClusters();
+  }, [sessionId, weekStart]);
+
+  async function loadSavedClusters() {
+    try {
+      let query = supabase
+        .from('topic_clusters')
+        .select('*, topic_cluster_projects(project_id)')
+        .eq('week_start', weekStart);
+
+      if (sessionId) {
+        query = query.eq('session_id', sessionId);
+      } else {
+        query = query.eq('is_global', true);
+      }
+
+      const { data: savedClusters, error: queryError } = await query;
+
+      if (queryError || !savedClusters || savedClusters.length === 0) {
+        setStage('idle');
+        return;
+      }
+
+      // Build ClusterDisplay from saved data
+      const displays: ClusterDisplay[] = savedClusters.map((cluster: any) => ({
+        theme_label: cluster.theme_label,
+        confidence: cluster.confidence,
+        project_ids: cluster.topic_cluster_projects?.map((p: TopicClusterProject) => p.project_id) ?? [],
+        exampleTitles: [], // Would need to fetch project titles
+      }));
+
+      setClusters(displays);
+      setStage('success');
+    } catch (err) {
+      console.error('Failed to load saved clusters:', err);
+      setStage('idle');
+    }
+  }
 
   const handleRunClustering = useCallback(async () => {
     setStage('loading');

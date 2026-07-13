@@ -30,11 +30,12 @@ export interface AppSettings {
 
 export interface TopicCluster {
   id: string;
-  session_id: string;
+  session_id: string | null; // null = global historical analysis
   week_start: string; // ISO date string (Monday)
   theme_label: string;
   confidence: number; // [0, 1]
   project_count: number;
+  is_global: boolean;
   created_at?: string;
 }
 

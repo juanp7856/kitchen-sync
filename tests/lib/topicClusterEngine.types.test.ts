@@ -19,6 +19,7 @@ describe('Topic cluster types', () => {
         theme_label: 'Auth fixes',
         confidence: 0.85,
         project_count: 3,
+        is_global: false,
         created_at: '2026-07-13T10:00:00Z',
       };
       expect(cluster.id).toBe('cluster-1');
@@ -26,6 +27,21 @@ describe('Topic cluster types', () => {
       expect(cluster.theme_label).toBe('Auth fixes');
       expect(cluster.confidence).toBe(0.85);
       expect(cluster.project_count).toBe(3);
+      expect(cluster.is_global).toBe(false);
+    });
+
+    it('should allow global clusters with null session', () => {
+      const cluster: TopicCluster = {
+        id: 'cluster-2',
+        session_id: null,
+        week_start: '2026-07-13',
+        theme_label: 'Global analysis',
+        confidence: 0.9,
+        project_count: 10,
+        is_global: true,
+      };
+      expect(cluster.session_id).toBeNull();
+      expect(cluster.is_global).toBe(true);
     });
 
     it('should allow optional created_at', () => {
@@ -36,6 +52,7 @@ describe('Topic cluster types', () => {
         theme_label: 'Singleton',
         confidence: 1.0,
         project_count: 1,
+        is_global: false,
       };
       expect(cluster.created_at).toBeUndefined();
     });
