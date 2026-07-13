@@ -25,3 +25,54 @@ export interface AppSettings {
   id: 1;
   current_host_email: string;
 }
+
+// ─── Topic Clusters ───────────────────────────────────────────────────────────
+
+export interface TopicCluster {
+  id: string;
+  session_id: string;
+  week_start: string; // ISO date string (Monday)
+  theme_label: string;
+  confidence: number; // [0, 1]
+  project_count: number;
+  created_at?: string;
+}
+
+/** Links a cluster to a project. Exactly one of profile_id or chef_name is set. */
+export interface TopicClusterProject {
+  topic_cluster_id: string;
+  project_id: string;
+  profile_id: string | null; // new projects
+  chef_name: string | null;  // legacy projects
+}
+
+/** Output of the DBSCAN clustering for a single project. */
+export interface ClusterResult {
+  project_id: string;
+  cluster_label: string;
+  confidence: number; // [0, 1]; 0 for noise
+  is_noise: boolean;
+}
+
+// ─── Worker Messages ───────────────────────────────────────────────────────────
+
+export type WorkerMessage =
+  | WorkerMessageProgress
+  | WorkerMessageResult
+  | WorkerMessageError;
+
+export interface WorkerMessageProgress {
+  type: 'progress';
+  stage: 'loading' | 'embedding' | 'clustering';
+  progress: number; // 0–100
+}
+
+export interface WorkerMessageResult {
+  type: 'result';
+  results: ClusterResult[];
+}
+
+export interface WorkerMessageError {
+  type: 'error';
+  error: string;
+}
