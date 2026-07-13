@@ -54,6 +54,7 @@ export default function KitchenPage() {
 
   const [historicalProjects, setHistoricalProjects] = useState<Project[]>([]);
   const [showHostTransferModal, setShowHostTransferModal] = useState(false);
+  const [currentView, setCurrentView] = useState<'kitchen' | 'analysis'>('kitchen');
 
   // Host management via database singleton
   const { isHost, transferHost } = useHostManager();
@@ -493,6 +494,20 @@ export default function KitchenPage() {
               </>
             )}
 
+            {isHostUser && (
+              <button
+                onClick={() => setCurrentView(currentView === 'kitchen' ? 'analysis' : 'kitchen')}
+                className={`p-3 rounded-xl border transition-all shadow-sm ${currentView === 'analysis' ? 'bg-kitchen-hot/20 text-kitchen-hot border-kitchen-hot/30' : 'bg-white/5 hover:bg-white/10 text-white border-white/10'}`}
+                title={currentView === 'kitchen' ? 'Ver análisis de temas' : 'Volver a la cocina'}
+              >
+                {currentView === 'kitchen' ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                )}
+              </button>
+            )}
+
             <button 
               onClick={handleLogout}
               className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors"
@@ -505,6 +520,8 @@ export default function KitchenPage() {
       </header>
 
       <div className="max-w-6xl mx-auto">
+        {currentView === 'kitchen' && (
+          <>
         <div className="flex justify-between items-center mb-6">
            <div className="flex bg-black/20 px-4 py-2 rounded-xl border border-white/5">
               <span className="text-[10px] md:text-xs font-mono text-white/60 tracking-widest uppercase text-center w-full">
@@ -632,8 +649,10 @@ export default function KitchenPage() {
           historicalProjects={historicalProjects}
           currentUser={{ name: session.name, avatar: session.avatar, email: session.email }} 
         />
+          </>
+        )}
 
-        {currentSession && (
+        {currentView === 'analysis' && currentSession && (
           <TopicHeatmap
             sessionId={currentSession.id}
             weekStart={weekStart}
