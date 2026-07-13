@@ -31,6 +31,7 @@ import AvatarDisplay from '@/components/AvatarDisplay';
 import { Project, KitchenSession } from '@/lib/types';
 import { cloneSession } from '@/lib/sessions';
 import { useHostManager } from '@/hooks/useHostManager';
+import TopicHeatmap from '@/components/host/TopicHeatmap';
 
 export const dynamic = 'force-dynamic';
 
@@ -393,6 +394,14 @@ export default function KitchenPage() {
 
   const isHostUser = isHost(session.email);
 
+  // weekStart: Monday of current week (ISO date string for topic clusters)
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon, ...
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const monday = new Date(now);
+  monday.setUTCDate(now.getUTCDate() - daysToMonday);
+  const weekStart = monday.toISOString().split('T')[0];
+
   const SortableDish = ({ project }: { project: Project }) => {
     const {
       attributes,
@@ -622,6 +631,13 @@ export default function KitchenPage() {
           projects={projects} 
           historicalProjects={historicalProjects}
           currentUser={{ name: session.name, avatar: session.avatar, email: session.email }} 
+        />
+
+        <TopicHeatmap
+          sessionId={currentSession!.id}
+          weekStart={weekStart}
+          isHost={isHostUser}
+          projects={projects}
         />
       </div>
 
