@@ -1,35 +1,27 @@
 /**
- * topicClusters — Orchestrator for weekly semantic clustering.
+ * topicClusters — Orchestrator for semantic clustering (main thread).
  *
  * Pipeline:
- *   1. Query projects (id, title, profile_id, chef_name) from Supabase
- *   2. Spawn Web Worker with project titles
- *   3. Receive ClusterResult[] from worker (embeddings never leave browser)
- *   4. DELETE existing clusters for (session_id, week_start)
- *   5. INSERT fresh clusters + project links into Supabase
- *   6. Return fresh cluster results
+ *   1. Dynamic import @xenova/transformers (lazy loaded)
+ *   2. Generate embeddings for project titles
+ *   3. Run DBSCAN clustering
+ *   4. Persist to Supabase (if session-specific)
  */
 
 import { supabase } from './supabase';
-import { WORKER_CODE } from './topicClusterWorkerCode';
 import type { ClusterResult, TopicCluster, TopicClusterProject } from './types';
 
 export { runClustering };
 
 interface RunClusteringOptions {
-  sessionId: string | null; // null = global historical analysis (all sessions)
-  weekStart: string; // ISO date (Monday)
+  sessionId: string | null; // null = global historical analysis
+  weekStart: string;
 }
 
 type ProgressCallback = (stage: 'loading' | 'embedding' | 'clustering', progress: number) => void;
 
 /**
- * Run the full clustering pipeline.
- * Returns fresh TopicCluster[] after persisting to Supabase.
- *
- * @param titles — Array of {id, title} for projects in scope
- * @param options — { sessionId, weekStart }
- * @param onProgress — Optional callback for progress updates
+ * Run the full clustering pipeline in the main thread.
  */
 async function runClustering(
   titles: { id: string; title: string }[],
@@ -38,58 +30,268 @@ async function runClustering(
 ): Promise<ClusterResult[]> {
   const { sessionId, weekStart } = options;
 
-  // ─── Edge case: empty ───────────────────────────────────────────────────────
   if (titles.length === 0) return [];
 
-  // ─── Spawn inline worker (avoid Turbopack bundling issues) ────────────────
-  const workerCode = WORKER_CODE;
-  const blob = new Blob([workerCode], { type: 'application/javascript' });
-  const workerUrl = URL.createObjectURL(blob);
-  const worker = new Worker(workerUrl);
+  // ─── Stage 1: Load model (lazy dynamic import) ────────────────────────────
+  onProgress?.('loading', 0);
 
-  return new Promise<ClusterResult[]>((resolve, reject) => {
-    worker.onmessage = async (event) => {
-      const msg = event.data;
+  const { pipeline } = await import('@xenova/transformers');
 
-      if (msg.type === 'progress') {
-        onProgress?.(msg.stage, msg.progress);
-        return;
-      }
-
-      if (msg.type === 'error') {
-        worker.terminate();
-        reject(new Error(msg.error));
-        return;
-      }
-
-      if (msg.type === 'result') {
-        worker.terminate();
-        const results: ClusterResult[] = msg.results;
-
-        // ─── Persist to Supabase (only for session-specific analysis) ────────
-        if (sessionId) {
-          await persistResults(results, titles, sessionId, weekStart);
+  const extractor = await pipeline(
+    'feature-extraction',
+    'Xenova/all-MiniLM-L6-v2',
+    {
+      progress_callback: (progress: any) => {
+        if (progress.status === 'progress' && progress.total) {
+          const pct = Math.round((progress.loaded / progress.total) * 50);
+          onProgress?.('loading', pct);
         }
-
-        resolve(results);
-        return;
       }
-    };
+    }
+  );
 
-    worker.onerror = (error) => {
-      worker.terminate();
-      reject(new Error(error.message ?? 'Worker error'));
-    };
+  onProgress?.('loading', 50);
 
-    // Start the worker
-    worker.postMessage({ type: 'run', titles });
+  // ─── Stage 2: Embed titles ────────────────────────────────────────────────
+  onProgress?.('embedding', 50);
+
+  const texts = titles.map(t => t.title).filter(Boolean);
+  const embeddingsOutput = await extractor(texts, {
+    pooling: 'mean',
+    normalize: true,
   });
+
+  let embeddingsArray;
+  if (embeddingsOutput && typeof embeddingsOutput.tolist === 'function') {
+    embeddingsArray = embeddingsOutput.tolist();
+  } else if (Array.isArray(embeddingsOutput)) {
+    embeddingsArray = embeddingsOutput;
+  } else {
+    throw new Error('Unexpected embeddings output format');
+  }
+
+  if (!Array.isArray(embeddingsArray[0])) {
+    embeddingsArray = [embeddingsArray];
+  }
+
+  const embeddings: Record<string, number[]> = {};
+  for (let i = 0; i < titles.length; i++) {
+    if (embeddingsArray[i]) {
+      embeddings[titles[i].id] = embeddingsArray[i];
+    }
+  }
+
+  onProgress?.('embedding', 90);
+
+  // ─── Stage 3: Cluster ───────────────────────────────────────────────────────
+  onProgress?.('clustering', 90);
+
+  const { labels } = dbscanCosine(titles, embeddings, 0.3, 2);
+  const results = buildClusters(titles, embeddings, labels);
+
+  // ─── Stage 4: Persist (only for session-specific) ─────────────────────────
+  if (sessionId) {
+    await persistResults(results, titles, sessionId, weekStart);
+  }
+
+  return results;
 }
 
-/**
- * Persist clustering results to Supabase.
- * Uses DELETE + INSERT strategy for weekly replacement (same session_id + week_start).
- */
+// ─── DBSCAN (pure JS, cosine distance) ────────────────────────────────────────
+
+const NOISE = -1;
+const UNCLASSIFIED = -2;
+
+function dbscanCosine(
+  titles: { id: string; title: string }[],
+  embeddings: Record<string, number[]>,
+  eps: number,
+  minPts: number
+) {
+  const n = titles.length;
+  const labels = new Array(n).fill(UNCLASSIFIED);
+  let clusterId = 0;
+
+  for (let i = 0; i < n; i++) {
+    if (labels[i] !== UNCLASSIFIED) continue;
+    const neighbours = regionQuery(titles, embeddings, i, eps);
+    if (neighbours.length < minPts) {
+      labels[i] = NOISE;
+    } else {
+      expandCluster(titles, embeddings, labels, i, neighbours, clusterId, eps, minPts);
+      clusterId++;
+    }
+  }
+
+  if (n === 1 && labels[0] === NOISE) labels[0] = 0;
+  return { labels };
+}
+
+function expandCluster(
+  titles: { id: string; title: string }[],
+  embeddings: Record<string, number[]>,
+  labels: number[],
+  pointIdx: number,
+  neighbours: number[],
+  clusterId: number,
+  eps: number,
+  minPts: number
+) {
+  labels[pointIdx] = clusterId;
+  const queue = [...neighbours];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (labels[current] === NOISE) labels[current] = clusterId;
+    if (labels[current] !== UNCLASSIFIED) continue;
+
+    labels[current] = clusterId;
+    const currentNeighbours = regionQuery(titles, embeddings, current, eps);
+    if (currentNeighbours.length >= minPts) {
+      for (const n of currentNeighbours) {
+        if (labels[n] === UNCLASSIFIED || labels[n] === NOISE) {
+          queue.push(n);
+        }
+      }
+    }
+  }
+}
+
+function regionQuery(
+  titles: { id: string; title: string }[],
+  embeddings: Record<string, number[]>,
+  pointIdx: number,
+  eps: number
+) {
+  const neighbours: number[] = [];
+  const pVec = embeddings[titles[pointIdx]?.id];
+  if (!pVec) return neighbours;
+
+  for (let i = 0; i < titles.length; i++) {
+    if (i === pointIdx) continue;
+    const oVec = embeddings[titles[i]?.id];
+    if (!oVec) continue;
+    if (cosineDist(pVec, oVec) <= eps) {
+      neighbours.push(i);
+    }
+  }
+  return neighbours;
+}
+
+function cosineDist(a: number[], b: number[]) {
+  return 1 - cosineSim(a, b);
+}
+
+function cosineSim(a: number[], b: number[]) {
+  if (!a || !b || a.length === 0 || b.length === 0) return 0;
+  let dot = 0, magA = 0, magB = 0;
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    dot += av * bv;
+    magA += av * av;
+    magB += bv * bv;
+  }
+  const mag = Math.sqrt(magA) * Math.sqrt(magB);
+  return mag === 0 ? 0 : dot / mag;
+}
+
+// ─── Result builder ──────────────────────────────────────────────────────────
+
+function buildClusters(
+  titles: { id: string; title: string }[],
+  embeddings: Record<string, number[]>,
+  labels: number[]
+): ClusterResult[] {
+  const clusterMap = new Map<number, number[]>();
+  for (let i = 0; i < labels.length; i++) {
+    const cid = labels[i];
+    if (!clusterMap.has(cid)) clusterMap.set(cid, []);
+    clusterMap.get(cid)!.push(i);
+  }
+
+  const results: ClusterResult[] = [];
+  for (let i = 0; i < titles.length; i++) {
+    const cid = labels[i];
+    const vec = embeddings[titles[i]?.id];
+
+    if (cid === NOISE) {
+      results.push({
+        project_id: titles[i].id,
+        cluster_label: titles[i].title,
+        confidence: 1.0,
+        is_noise: true,
+      });
+      continue;
+    }
+
+    const memberIndices = clusterMap.get(cid)!;
+    const memberTitles = memberIndices.map(idx => titles[idx]?.title).filter(Boolean);
+    const label = computeLabel(memberTitles);
+    const confidence = computeConfidence(vec, memberIndices, titles, embeddings);
+
+    results.push({
+      project_id: titles[i].id,
+      cluster_label: label,
+      confidence,
+      is_noise: false,
+    });
+  }
+  return results;
+}
+
+function computeLabel(titles: string[]) {
+  if (titles.length === 0) return 'Sin tema claro';
+  if (titles.length === 1) return titles[0];
+
+  const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'con', 'los', 'las', 'del', 'fix', 'bug']);
+  const counts = new Map<string, number>();
+
+  for (const title of titles) {
+    const words = String(title).toLowerCase().split(/\s+/);
+    for (const w of words) {
+      const cleaned = w.replace(/[^a-z0-9]/g, '');
+      if (cleaned.length >= 3 && !stopWords.has(cleaned)) {
+        counts.set(cleaned, (counts.get(cleaned) ?? 0) + 1);
+      }
+    }
+  }
+
+  if (counts.size === 0) return titles[0];
+
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return sorted.slice(0, 3).map(([w]) => w).join(' ');
+}
+
+function computeConfidence(
+  vec: number[] | undefined,
+  memberIndices: number[],
+  titles: { id: string; title: string }[],
+  embeddings: Record<string, number[]>
+) {
+  if (memberIndices.length === 1) return 1.0;
+  if (!vec) return 0;
+
+  const EMBEDDING_DIM = 384;
+  const centroid = new Array(EMBEDDING_DIM).fill(0);
+  for (const idx of memberIndices) {
+    const mVec = embeddings[titles[idx]?.id];
+    if (!mVec) continue;
+    for (let i = 0; i < EMBEDDING_DIM; i++) {
+      centroid[i] += mVec[i] ?? 0;
+    }
+  }
+  for (let i = 0; i < EMBEDDING_DIM; i++) {
+    centroid[i] /= memberIndices.length;
+  }
+
+  const sim = cosineSim(vec, centroid);
+  return Math.max(0, (sim + 1) / 2);
+}
+
+// ─── Persistence ───────────────────────────────────────────────────────────────
+
 async function persistResults(
   results: ClusterResult[],
   titles: { id: string; title: string }[],
@@ -98,7 +300,6 @@ async function persistResults(
 ): Promise<void> {
   if (results.length === 0) return;
 
-  // Group results by cluster_label to build TopicCluster rows
   const clusterMap = new Map<string, ClusterResult[]>();
   for (const r of results) {
     if (!clusterMap.has(r.cluster_label)) {
@@ -107,7 +308,7 @@ async function persistResults(
     clusterMap.get(r.cluster_label)!.push(r);
   }
 
-  // ─── DELETE existing clusters for this week ───────────────────────────────
+  // DELETE existing clusters for this week
   const { error: deleteError } = await supabase
     .from('topic_clusters')
     .delete()
@@ -116,7 +317,7 @@ async function persistResults(
 
   if (deleteError) throw new Error(`Failed to delete old clusters: ${deleteError.message}`);
 
-  // ─── INSERT new clusters ─────────────────────────────────────────────────
+  // INSERT new clusters
   const clusters: TopicCluster[] = Array.from(clusterMap.entries()).map(([theme_label, members]) => ({
     id: crypto.randomUUID(),
     session_id: sessionId,
@@ -132,9 +333,7 @@ async function persistResults(
 
   if (insertClusterError) throw new Error(`Failed to insert clusters: ${insertClusterError.message}`);
 
-  // ─── INSERT project links ─────────────────────────────────────────────────
-  // We need profile_id/chef_name from the original projects query.
-  // Re-query to get full project data with profile linkage.
+  // Fetch project metadata for linking
   const { data: projectsData, error: projectsError } = await supabase
     .from('projects')
     .select('id, profile_id, chef_id')
@@ -151,17 +350,13 @@ async function persistResults(
     const members = clusterMap.get(cluster.theme_label)!;
     for (const member of members) {
       const meta = projectMeta.get(member.project_id);
-      if (!meta) continue; // shouldn't happen
-
-      // Mixed traceability: use profile_id if available, chef_name (chef_id) otherwise
-      const profile_id = meta.profile_id ?? null;
-      const chef_name = meta.chef_id ?? null; // chef_id is stored as chef_name in legacy projects
+      if (!meta) continue;
 
       links.push({
         topic_cluster_id: cluster.id,
         project_id: member.project_id,
-        profile_id,
-        chef_name,
+        profile_id: meta.profile_id ?? null,
+        chef_name: meta.chef_id ?? null,
       });
     }
   }
