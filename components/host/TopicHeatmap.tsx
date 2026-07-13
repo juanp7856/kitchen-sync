@@ -399,8 +399,6 @@ export default function TopicHeatmap({ weekStart, isHost }: TopicHeatmapProps) {
                 }}
                 labelSkipSize={40}
                 labelTextColor="rgba(255,255,255,0.9)"
-                labelPosition="center"
-                labelPadding={8}
                 parentLabelTextColor="transparent"
                 borderWidth={2}
                 borderColor="#000000"
@@ -432,7 +430,7 @@ export default function TopicHeatmap({ weekStart, isHost }: TopicHeatmapProps) {
                     text: {
                       fontSize: 13,
                       fontWeight: 700,
-                      fontFamily: 'Geist Sans, system-ui, sans-serif',
+                      fontFamily: 'Poppins, ui-sans-serif, system-ui, sans-serif',
                       fill: 'rgba(255,255,255,0.95)',
                       outlineWidth: 2,
                       outlineColor: 'rgba(0,0,0,0.7)',
