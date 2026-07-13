@@ -341,38 +341,48 @@ async function persistResults(
 
   if (insertClusterError) throw new Error(`Failed to insert clusters: ${insertClusterError.message}`);
 
-  // Fetch project metadata for linking
-  const projectIds = titles.map(t => t.id);
-  const { data: projectsData, error: projectsError } = await supabase
-    .from('projects')
-    .select('id, profile_id, chef_id')
-    .in('id', projectIds);
+  // Fetch project metadata for linking (graceful fallback)
+  const projectIds = titles.map(t => t.id).filter(Boolean);
+  let projectMeta = new Map<string, { profile_id: string | null; chef_id: string | null }>();
 
-  if (projectsError) throw new Error(`Failed to fetch project data: ${projectsError.message}`);
+  if (projectIds.length > 0) {
+    try {
+      const { data: projectsData, error: projectsError } = await supabase
+        .from('projects')
+        .select('id, profile_id, chef_id')
+        .in('id', projectIds);
 
-  const projectMeta = new Map(
-    (projectsData ?? []).map(p => [p.id, { profile_id: p.profile_id, chef_id: p.chef_id }])
-  );
+      if (!projectsError && projectsData) {
+        projectMeta = new Map(
+          projectsData.map(p => [p.id, { profile_id: p.profile_id ?? null, chef_id: p.chef_id ?? null }])
+        );
+      }
+    } catch (err) {
+      console.warn('[topicClusters] Failed to fetch project metadata, using empty links:', err);
+    }
+  }
 
   const links: TopicClusterProject[] = [];
   for (const cluster of clusters) {
     const members = clusterMap.get(cluster.theme_label)!;
     for (const member of members) {
       const meta = projectMeta.get(member.project_id);
-      if (!meta) continue;
-
       links.push({
         topic_cluster_id: cluster.id,
         project_id: member.project_id,
-        profile_id: meta.profile_id ?? null,
-        chef_name: meta.chef_id ?? null,
+        profile_id: meta?.profile_id ?? null,
+        chef_name: meta?.chef_id ?? null,
       });
     }
   }
 
-  const { error: insertLinkError } = await supabase
-    .from('topic_cluster_projects')
-    .insert(links);
+  if (links.length > 0) {
+    const { error: insertLinkError } = await supabase
+      .from('topic_cluster_projects')
+      .insert(links);
 
-  if (insertLinkError) throw new Error(`Failed to insert cluster links: ${insertLinkError.message}`);
+    if (insertLinkError) {
+      console.warn('[topicClusters] Failed to insert cluster links:', insertLinkError.message);
+    }
+  }
 }
