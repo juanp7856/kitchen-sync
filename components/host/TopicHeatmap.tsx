@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 import { runClustering } from '@/lib/topicClusters';
 import type { ClusterResult } from '@/lib/types';
 
 interface TopicHeatmapProps {
-  sessionId: string;
+  sessionId: string | null; // null = analyze all historical projects
   weekStart: string; // ISO date (Monday)
   isHost: boolean;
   projects: Array<{ id: string; title: string }>;
@@ -26,13 +27,38 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
   const [error, setError] = useState<string | null>(null);
   const [clusters, setClusters] = useState<ClusterDisplay[]>([]);
 
+  const [allProjects, setAllProjects] = useState<Array<{ id: string; title: string }>>([]);
+
   const handleRunClustering = useCallback(async () => {
     setStage('loading');
     setError(null);
     setProgress(0);
 
     try {
-      const titles = projects.map(p => ({ id: p.id, title: p.title }));
+      let titles: Array<{ id: string; title: string }>;
+
+      if (sessionId) {
+        // Session-specific: use current projects from props
+        titles = projects.map(p => ({ id: p.id, title: p.title }));
+      } else {
+        // Global historical: fetch ALL projects from database
+        setStage('loading');
+        const { data: allProjectsData, error: queryError } = await supabase
+          .from('projects')
+          .select('id, title')
+          .not('title', 'is', null);
+
+        if (queryError) throw new Error(`Failed to fetch historical projects: ${queryError.message}`);
+        
+        titles = (allProjectsData ?? []).map(p => ({ id: p.id, title: p.title }));
+        setAllProjects(titles);
+      }
+
+      if (titles.length === 0) {
+        setStage('empty');
+        setClusters([]);
+        return;
+      }
 
       const results = await runClustering(titles, { sessionId, weekStart }, (stage, progress) => {
         if (stage === 'loading') setStage('loading');
@@ -54,11 +80,12 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
         clusterMap.get(r.cluster_label)!.push(r);
       }
 
+      const projectSource = sessionId ? projects : allProjects;
       const displays: ClusterDisplay[] = [];
       for (const [label, members] of clusterMap.entries()) {
         const project_ids = members.map(m => m.project_id);
         const exampleTitles = members.slice(0, 3).map(m => {
-          const p = projects.find(proj => proj.id === m.project_id);
+          const p = projectSource.find(proj => proj.id === m.project_id);
           return p?.title ?? m.project_id;
         });
         const avgConfidence = members.reduce((sum, m) => sum + m.confidence, 0) / members.length;
@@ -77,10 +104,14 @@ export default function TopicHeatmap({ sessionId, weekStart, isHost, projects }:
       setClusters(displays);
       setStage('success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido');
+      console.error('[TopicHeatmap] Clustering error:', err);
+      const errorMessage = err instanceof Error 
+        ? `Error: ${err.message}` 
+        : 'Error desconocido al analizar temas. Revisa la consola (F12) para más detalles.';
+      setError(errorMessage);
       setStage('error');
     }
-  }, [projects, sessionId, weekStart]);
+  }, [projects, sessionId, weekStart, allProjects]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 

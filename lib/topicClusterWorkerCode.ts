@@ -1,84 +1,80 @@
-/**
- * topicCluster.worker — Web Worker for topic clustering
- *
- * Runs entirely in the worker thread:
- *   1. Load @xenova/transformers model (cached in IndexedDB)
- *   2. Generate embeddings for project titles
- *   3. Run DBSCAN clustering
- *   4. Post results back to main thread
- *
- * Privacy: embeddings NEVER leave the browser.
- */
+// Inline worker code for topic clustering — avoids Turbopack bundling issues
+// This string is injected into a Blob URL to create the Web Worker at runtime
 
+export const WORKER_CODE = `
 self.onmessage = async function handler(event) {
   const { type, titles } = event.data;
-
   if (type !== 'run') return;
 
   try {
-    // ─── Stage 1: Load model ────────────────────────────────────────────────
+    if (!titles || !Array.isArray(titles) || titles.length === 0) {
+      throw new Error('No titles provided for clustering');
+    }
+
     postProgress('loading', 0);
 
-    const { pipeline, env } = await import('@xenova/transformers');
-
-    // Enable IndexedDB caching (persistent across sessions)
-    env.cacheDir = 'indexeddb://xenova-transformers';
+    // Load @xenova/transformers from CDN
+    const { pipeline, env } = await import('https://esm.sh/@xenova/transformers@2.17.2');
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
 
     const extractor = await pipeline(
       'feature-extraction',
       'Xenova/all-MiniLM-L6-v2',
-      { progress_callback: (progress) => {
+      { 
+        dtype: 'fp32',
+        progress_callback: (progress) => {
           if (progress.status === 'progress' && progress.total) {
-            postProgress('loading', Math.round(progress.index / progress.total * 50));
+            const pct = Math.round((progress.loaded / progress.total) * 50);
+            postProgress('loading', pct);
           }
         }
       }
     );
 
     postProgress('loading', 50);
-
-    // ─── Stage 2: Embed titles ──────────────────────────────────────────────
     postProgress('embedding', 50);
 
-    const texts = titles.map(t => t.title);
-    const embeddingsOutput = await extractor(texts, {
-      pooling: 'mean',
-      normalize: true,
-    });
+    const texts = titles.map(t => t.title).filter(Boolean);
+    if (texts.length === 0) throw new Error('No valid titles to embed');
 
-    // embeddingsOutput is a 2D array: [num_titles, embedding_dim]
-    const embeddingsArray = embeddingsOutput.tolist
-      ? embeddingsOutput.tolist()   // Tensor object
-      : embeddingsOutput;            // plain array
+    const embeddingsOutput = await extractor(texts, { pooling: 'mean', normalize: true });
+
+    let embeddingsArray;
+    if (embeddingsOutput && typeof embeddingsOutput.tolist === 'function') {
+      embeddingsArray = embeddingsOutput.tolist();
+    } else if (Array.isArray(embeddingsOutput)) {
+      embeddingsArray = embeddingsOutput;
+    } else {
+      throw new Error('Unexpected embeddings output format');
+    }
+
+    if (!Array.isArray(embeddingsArray[0])) {
+      embeddingsArray = [embeddingsArray];
+    }
 
     const embeddings = {};
-    titles.forEach((t, i) => {
-      embeddings[t.id] = embeddingsArray[i];
-    });
+    for (let i = 0; i < titles.length; i++) {
+      if (embeddingsArray[i]) embeddings[titles[i].id] = embeddingsArray[i];
+    }
 
     postProgress('embedding', 90);
-
-    // ─── Stage 3: Cluster (pure JS — DBSCAN) ───────────────────────────────
     postProgress('clustering', 90);
 
-    // Inline DBSCAN to avoid module import complexity in worker
     const { labels } = dbscanCosine(titles, embeddings, 0.3, 2);
-
-    // ─── Stage 4: Build results ─────────────────────────────────────────────
     const clusters = buildClusters(titles, embeddings, labels);
 
     self.postMessage({ type: 'result', results: clusters });
 
   } catch (error) {
-    self.postMessage({ type: 'error', error: error.message ?? String(error) });
+    console.error('Worker error:', error);
+    self.postMessage({ type: 'error', error: error?.message ?? String(error) });
   }
 };
 
 function postProgress(stage, progress) {
   self.postMessage({ type: 'progress', stage, progress });
 }
-
-// ─── DBSCAN (inline, pure cosine distance) ────────────────────────────────────
 
 const NOISE = -1;
 const UNCLASSIFIED = -2;
@@ -92,44 +88,29 @@ function dbscanCosine(titles, embeddings, eps, minPts) {
     if (labels[i] !== UNCLASSIFIED) continue;
     const neighbours = regionQuery(titles, embeddings, i, eps);
     if (neighbours.length < minPts) {
-      if (neighbours.length === 0) {
-        labels[i] = NOISE;
-      } else {
-        expandCluster(titles, embeddings, labels, i, neighbours, clusterId, eps, minPts);
-        clusterId++;
-      }
+      labels[i] = NOISE;
     } else {
       expandCluster(titles, embeddings, labels, i, neighbours, clusterId, eps, minPts);
       clusterId++;
     }
   }
 
-  // Singleton post-process: 1 title marked noise → its own cluster
-  if (n === 1 && labels[0] === NOISE) {
-    labels[0] = 0;
-  }
-
+  if (n === 1 && labels[0] === NOISE) labels[0] = 0;
   return { labels };
 }
 
 function expandCluster(titles, embeddings, labels, pointIdx, neighbours, clusterId, eps, minPts) {
   labels[pointIdx] = clusterId;
   const queue = [...neighbours];
-
   while (queue.length > 0) {
     const current = queue.shift();
-    if (labels[current] === NOISE) {
-      labels[current] = clusterId;
-    }
+    if (labels[current] === NOISE) labels[current] = clusterId;
     if (labels[current] !== UNCLASSIFIED) continue;
-
     labels[current] = clusterId;
     const currentNeighbours = regionQuery(titles, embeddings, current, eps);
     if (currentNeighbours.length >= minPts) {
       for (const n of currentNeighbours) {
-        if (labels[n] === UNCLASSIFIED || labels[n] === NOISE) {
-          queue.push(n);
-        }
+        if (labels[n] === UNCLASSIFIED || labels[n] === NOISE) queue.push(n);
       }
     }
   }
@@ -137,13 +118,13 @@ function expandCluster(titles, embeddings, labels, pointIdx, neighbours, cluster
 
 function regionQuery(titles, embeddings, pointIdx, eps) {
   const neighbours = [];
-  const pVec = embeddings[titles[pointIdx].id];
+  const pVec = embeddings[titles[pointIdx]?.id];
+  if (!pVec) return neighbours;
   for (let i = 0; i < titles.length; i++) {
     if (i === pointIdx) continue;
-    const oVec = embeddings[titles[i].id];
-    if (cosineDist(pVec, oVec) <= eps) {
-      neighbours.push(i);
-    }
+    const oVec = embeddings[titles[i]?.id];
+    if (!oVec) continue;
+    if (cosineDist(pVec, oVec) <= eps) neighbours.push(i);
   }
   return neighbours;
 }
@@ -153,7 +134,8 @@ function cosineDist(a, b) {
 }
 
 function cosineSim(a, b) {
-  if (!a || !b || a.length === 0 || b.length === 0) return 0;
+  if (!a || !b || !Array.isArray(a) || !Array.isArray(b)) return 0;
+  if (a.length === 0 || b.length === 0) return 0;
   let dot = 0, magA = 0, magB = 0;
   const len = Math.max(a.length, b.length);
   for (let i = 0; i < len; i++) {
@@ -167,10 +149,7 @@ function cosineSim(a, b) {
   return mag === 0 ? 0 : dot / mag;
 }
 
-// ─── Result builder ──────────────────────────────────────────────────────────
-
 function buildClusters(titles, embeddings, labels) {
-  // Group by cluster_id
   const clusterMap = new Map();
   for (let i = 0; i < labels.length; i++) {
     const cid = labels[i];
@@ -179,46 +158,29 @@ function buildClusters(titles, embeddings, labels) {
   }
 
   const results = [];
-
   for (let i = 0; i < titles.length; i++) {
     const cid = labels[i];
-    const vec = embeddings[titles[i].id];
-
+    const vec = embeddings[titles[i]?.id];
     if (cid === NOISE) {
-      results.push({
-        project_id: titles[i].id,
-        cluster_label: 'Sin tema claro',
-        confidence: 0,
-        is_noise: true,
-      });
+      results.push({ project_id: titles[i].id, cluster_label: titles[i].title, confidence: 1.0, is_noise: true });
       continue;
     }
-
     const memberIndices = clusterMap.get(cid);
-    const memberTitles = memberIndices.map(idx => titles[idx].title);
+    const memberTitles = memberIndices.map(idx => titles[idx]?.title).filter(Boolean);
     const label = computeLabel(memberTitles);
     const confidence = computeConfidence(vec, memberIndices, titles, embeddings);
-
-    results.push({
-      project_id: titles[i].id,
-      cluster_label: label,
-      confidence,
-      is_noise: false,
-    });
+    results.push({ project_id: titles[i].id, cluster_label: label, confidence, is_noise: false });
   }
-
   return results;
 }
 
 function computeLabel(titles) {
   if (titles.length === 0) return 'Sin tema claro';
   if (titles.length === 1) return titles[0];
-
-  const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'eles', 'con', 'los', 'las', 'del']);
+  const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'con', 'los', 'las', 'del', 'fix', 'bug']);
   const counts = new Map();
-
   for (const title of titles) {
-    const words = title.toLowerCase().split(/\s+/);
+    const words = String(title).toLowerCase().split(/\\s+/);
     for (const w of words) {
       const cleaned = w.replace(/[^a-z0-9]/g, '');
       if (cleaned.length >= 3 && !stopWords.has(cleaned)) {
@@ -226,28 +188,22 @@ function computeLabel(titles) {
       }
     }
   }
-
   if (counts.size === 0) return titles[0];
-
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   return sorted.slice(0, 3).map(([w]) => w).join(' ');
 }
 
 function computeConfidence(vec, memberIndices, titles, embeddings) {
   if (memberIndices.length === 1) return 1.0;
-
   const EMBEDDING_DIM = 384;
   const centroid = new Array(EMBEDDING_DIM).fill(0);
   for (const idx of memberIndices) {
-    const mVec = embeddings[titles[idx].id];
-    for (let i = 0; i < EMBEDDING_DIM; i++) {
-      centroid[i] += mVec[i] ?? 0;
-    }
+    const mVec = embeddings[titles[idx]?.id];
+    if (!mVec || !Array.isArray(mVec)) continue;
+    for (let i = 0; i < EMBEDDING_DIM; i++) centroid[i] += mVec[i] ?? 0;
   }
-  for (let i = 0; i < EMBEDDING_DIM; i++) {
-    centroid[i] /= memberIndices.length;
-  }
-
+  for (let i = 0; i < EMBEDDING_DIM; i++) centroid[i] /= memberIndices.length;
   const sim = cosineSim(vec, centroid);
   return Math.max(0, (sim + 1) / 2);
 }
+`;

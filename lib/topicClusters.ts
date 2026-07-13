@@ -11,12 +11,13 @@
  */
 
 import { supabase } from './supabase';
+import { WORKER_CODE } from './topicClusterWorkerCode';
 import type { ClusterResult, TopicCluster, TopicClusterProject } from './types';
 
 export { runClustering };
 
 interface RunClusteringOptions {
-  sessionId: string;
+  sessionId: string | null; // null = global historical analysis (all sessions)
   weekStart: string; // ISO date (Monday)
 }
 
@@ -40,10 +41,11 @@ async function runClustering(
   // ─── Edge case: empty ───────────────────────────────────────────────────────
   if (titles.length === 0) return [];
 
-  // ─── Spawn worker ───────────────────────────────────────────────────────────
-  const worker = new Worker(
-    new URL('../public/workers/topicCluster.worker.js', import.meta.url)
-  );
+  // ─── Spawn inline worker (avoid Turbopack bundling issues) ────────────────
+  const workerCode = WORKER_CODE;
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  const workerUrl = URL.createObjectURL(blob);
+  const worker = new Worker(workerUrl);
 
   return new Promise<ClusterResult[]>((resolve, reject) => {
     worker.onmessage = async (event) => {
@@ -64,8 +66,10 @@ async function runClustering(
         worker.terminate();
         const results: ClusterResult[] = msg.results;
 
-        // ─── Persist to Supabase ────────────────────────────────────────────
-        await persistResults(results, titles, sessionId, weekStart);
+        // ─── Persist to Supabase (only for session-specific analysis) ────────
+        if (sessionId) {
+          await persistResults(results, titles, sessionId, weekStart);
+        }
 
         resolve(results);
         return;

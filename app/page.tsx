@@ -652,9 +652,9 @@ export default function KitchenPage() {
           </>
         )}
 
-        {currentView === 'analysis' && currentSession && (
+        {currentView === 'analysis' && (
           <TopicHeatmap
-            sessionId={currentSession.id}
+            sessionId={currentSession?.id ?? null}
             weekStart={weekStart}
             isHost={isHostUser}
             projects={projects}
