@@ -201,7 +201,8 @@ export default function KitchenPage() {
             if (presence.avatar) {
               avatars[key] = { 
                 avatar: presence.avatar, 
-                isReady: !!presence.isReady 
+                isReady: !!presence.isReady,
+                email: presence.email || key
               };
             }
           }
@@ -214,6 +215,7 @@ export default function KitchenPage() {
           await pChannel.track({
             name: parsedSession.name,
             avatar: parsedSession.avatar,
+            email: parsedSession.email,
             isReady: false
           });
         }
@@ -246,6 +248,7 @@ export default function KitchenPage() {
       presenceChannel.track({
         name: session.name,
         avatar: session.avatar,
+        email: session.email,
         isReady: isReady
       });
     }

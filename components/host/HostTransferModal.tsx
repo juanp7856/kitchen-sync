@@ -7,7 +7,7 @@ interface HostTransferModalProps {
   onClose: () => void;
   isHost: boolean;
   transferHost: (newEmail: string) => Promise<void>;
-  chefAvatars: Record<string, { avatar: string; isReady: boolean }>;
+  chefAvatars: Record<string, { avatar: string; isReady: boolean; email?: string }>;
   currentUserEmail: string;
 }
 
@@ -27,7 +27,11 @@ const HostTransferModal: React.FC<HostTransferModalProps> = ({
 
   const handleTransfer = async () => {
     if (!selectedChef) return;
-    if (selectedChef.toLowerCase() === currentUserEmail.toLowerCase()) {
+
+    const selectedChefData = chefs.find((c) => c.name === selectedChef);
+    const targetEmail = selectedChefData?.email || selectedChef;
+
+    if (targetEmail.toLowerCase() === currentUserEmail.toLowerCase()) {
       setError('No puedes transferirte el rol a ti mismo');
       return;
     }
@@ -36,7 +40,7 @@ const HostTransferModal: React.FC<HostTransferModalProps> = ({
     setError(null);
 
     try {
-      await transferHost(selectedChef);
+      await transferHost(targetEmail);
       onClose();
       setSelectedChef(null);
     } catch (err) {
@@ -48,7 +52,7 @@ const HostTransferModal: React.FC<HostTransferModalProps> = ({
 
   // Get list of chefs from presence (exclude current user)
   const chefs = Object.entries(chefAvatars)
-    .filter(([name]) => name.toLowerCase() !== currentUserEmail.toLowerCase())
+    .filter(([, data]) => (data.email || '').toLowerCase() !== currentUserEmail.toLowerCase())
     .map(([name, data]) => ({ name, ...data }));
 
   return (
