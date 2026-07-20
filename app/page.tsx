@@ -48,7 +48,7 @@ export default function KitchenPage() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const [chefAvatars, setChefAvatars] = useState<Record<string, { avatar: string; isReady: boolean }>>({});
+  const [chefAvatars, setChefAvatars] = useState<Record<string, { avatar: string; isReady: boolean; email?: string }>>({});
   const [presenceChannel, setPresenceChannel] = useState<any>(null);
   const [currentSession, setCurrentSession] = useState<KitchenSession | null>(null);
 
@@ -192,7 +192,7 @@ export default function KitchenPage() {
     pChannel
       .on('presence', { event: 'sync' }, () => {
         const state = pChannel.presenceState();
-        const avatars: Record<string, { avatar: string; isReady: boolean }> = {};
+        const avatars: Record<string, { avatar: string; isReady: boolean; email?: string }> = {};
         
         Object.keys(state).forEach((key) => {
           const presences = state[key] as any[];
